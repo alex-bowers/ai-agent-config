@@ -1,0 +1,153 @@
+#!/bin/sh
+# Portable installer for canonical agent skills and instructions.
+
+set -u
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+DEFAULT_HOME=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+AGENT_CONFIG_HOME=${AGENT_CONFIG_HOME:-$DEFAULT_HOME}
+DEFAULTS_FILE="$AGENT_CONFIG_HOME/config/defaults.env"
+LOCAL_FILE="$AGENT_CONFIG_HOME/.agent-config.local.env"
+
+COMMAND=help
+VENDOR=all
+FORCE=0
+DRY_RUN=0
+
+usage() {
+  cat <<'EOF'
+Usage: agent-config <command> [options]
+
+Commands:
+  install   Create or repair selected symlinks.
+  sync      Alias for install.
+  doctor    Check selected canonical files and symlinks.
+  status    Show selected source and destination paths.
+  help      Show this help.
+
+Options:
+  --vendor NAME  claude-code, codex, copilot or all (default: all)
+  --force        Replace only selected conflicting destinations.
+  --dry-run      Print changes without writing them.
+  -h, --help     Show this help.
+
+Configuration is loaded from config/defaults.env and optional
+.agent-config.local.env in the repository checkout. Local configuration wins.
+EOF
+}
+
+die() { printf '%s\n' "error: $*" >&2; exit 1; }
+note() { printf '%s\n' "$*"; }
+
+[ -f "$DEFAULTS_FILE" ] || die "missing $DEFAULTS_FILE"
+. "$DEFAULTS_FILE"
+if [ -f "$LOCAL_FILE" ]; then
+  . "$LOCAL_FILE"
+fi
+
+if [ "$#" -gt 0 ]; then
+  COMMAND=$1
+  shift
+fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --vendor) [ "$#" -ge 2 ] || die "--vendor requires a name"; VENDOR=$2; shift 2 ;;
+    --force) FORCE=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help) COMMAND=help; shift ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+validate_vendor() {
+  case "$1" in claude-code|codex|copilot|all) ;; *) die "unknown vendor: $1" ;; esac
+}
+
+run_or_print() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    note "would: $*"
+  else
+    "$@"
+  fi
+}
+
+link_one() {
+  source=$1
+  destination=$2
+  [ -e "$source" ] || die "canonical source is missing: $source"
+
+  if [ -L "$destination" ] && [ "$(readlink "$destination")" = "$source" ]; then
+    note "ok: $destination"
+    return 0
+  fi
+  if [ -e "$destination" ] || [ -L "$destination" ]; then
+    if [ "$FORCE" -ne 1 ]; then
+      die "destination exists: $destination (use --force to replace this selected target)"
+    fi
+    run_or_print rm -rf "$destination"
+  fi
+  run_or_print mkdir -p "$(dirname "$destination")"
+  run_or_print ln -s "$source" "$destination"
+  note "linked: $destination -> $source"
+}
+
+doctor_one() {
+  source=$1
+  destination=$2
+  if [ ! -e "$source" ]; then
+    printf 'missing canonical source: %s\n' "$source" >&2
+    return 1
+  fi
+  if [ ! -L "$destination" ]; then
+    printf 'missing symlink: %s\n' "$destination" >&2
+    return 1
+  fi
+  if [ "$(readlink "$destination")" != "$source" ]; then
+    printf 'wrong symlink: %s -> %s (expected %s)\n' "$destination" "$(readlink "$destination")" "$source" >&2
+    return 1
+  fi
+  note "healthy: $destination"
+}
+
+handle_adapter() {
+  adapter=$1
+  adapter_file="$AGENT_CONFIG_HOME/adapters/$adapter.env"
+  [ -f "$adapter_file" ] || die "missing adapter: $adapter"
+  ADAPTER_ID= SKILLS_ROOT= INSTRUCTIONS_TARGET=
+  . "$adapter_file"
+  [ "$ADAPTER_ID" ] || die "adapter has no ID: $adapter_file"
+
+  for skill in "$AGENT_CONFIG_HOME"/agents/skills/*; do
+    [ -d "$skill" ] || continue
+    target="$SKILLS_ROOT/$(basename "$skill")"
+    case "$COMMAND" in
+      install|sync) link_one "$skill" "$target" ;;
+      doctor) doctor_one "$skill" "$target" || FAILED=1 ;;
+      status) note "$ADAPTER_ID skill: $target -> $skill" ;;
+    esac
+  done
+  if [ -n "$INSTRUCTIONS_TARGET" ]; then
+    source="$AGENT_CONFIG_HOME/agents/AGENTS.md"
+    case "$COMMAND" in
+      install|sync) link_one "$source" "$INSTRUCTIONS_TARGET" ;;
+      doctor) doctor_one "$source" "$INSTRUCTIONS_TARGET" || FAILED=1 ;;
+      status) note "$ADAPTER_ID instructions: $INSTRUCTIONS_TARGET -> $source" ;;
+    esac
+  fi
+}
+
+validate_vendor "$VENDOR"
+case "$COMMAND" in
+  help) usage ;;
+  install|sync|doctor|status)
+    FAILED=0
+    case "$VENDOR" in
+      all) for adapter in claude-code openai-codex github-copilot; do handle_adapter "$adapter"; done ;;
+      claude-code) handle_adapter claude-code ;;
+      codex) handle_adapter openai-codex ;;
+      copilot) handle_adapter github-copilot ;;
+    esac
+    exit "$FAILED"
+    ;;
+  *) die "unknown command: $COMMAND" ;;
+esac
