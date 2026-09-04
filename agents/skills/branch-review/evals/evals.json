@@ -1,0 +1,23 @@
+{
+  "skill_name": "branch-review",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review my branch against origin/main before I open a PR. It changes TypeScript code, tests, and README documentation.",
+      "expected_output": "A scoped review that checks the actual diff, documentation quality, project checks, security, and test coverage without inventing frontend results.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Do a pre-PR review of this branch. It updates a Vue form, its styles, and a client-side API call.",
+      "expected_output": "A review that routes markup through the HTML skill, uses the web quality audit proportionately, checks accessibility and browser behaviour, and performs the all-change security pass.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Check this branch before PR: it contains a database migration, CI workflow, dependency manifest, and lockfile update.",
+      "expected_output": "A review that highlights migration safety, CI permissions and secret exposure, dependency relevance, and safe verification limits.",
+      "files": []
+    }
+  ]
+}
