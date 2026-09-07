@@ -1,136 +1,104 @@
 ---
 name: branch-review
-description: Review a branch before opening a pull request by inspecting the proposed diff, running relevant project checks, and routing focused checks for documentation, frontend, security, configuration, dependency, and data changes. Use for requests such as "review my branch", "pre-PR check", "PR readiness review", or "sanity-check these changes before review".
+description: Review a branch before opening a pull request. Establish the intended comparison range, inspect the proposed diff and relevant local context, run proportionate checks, and use available specialist skills when the change warrants them.
 ---
 
 # Branch review
 
-Perform an evidence-led pre-PR review that catches likely mistakes before a human reviewer spends time on them. Review the proposed change, its necessary context, and the project conventions; do not re-review unrelated existing code or substitute this process for peer review.
+Perform an evidence-led pre-PR review that identifies credible issues before human review. Review the proposed change, the context needed to understand it, and relevant repository conventions. Do not re-review unrelated existing code or substitute this process for peer review.
 
-The default mode is review-only. Do not edit files, create commits, push branches, run migrations, deploy, or change external services unless the user separately asks for that work.
+Default mode is review-only. Do not edit files, create commits, push branches, install or upgrade dependencies, run migrations, deploy, or change external services unless the user separately asks.
 
-## Inputs and scope
+## Establish scope
 
-Accept an optional base branch or ref, for example `origin/main`, and an optional request to include uncommitted changes.
+Accept an optional base branch or ref, and an optional request to include uncommitted changes.
 
-1. Establish the intended pull-request base branch before reviewing. Use an explicitly supplied ref or reliable repository/PR metadata. A configured remote default branch is only a fallback when it clearly matches the intended PR target.
+1. Establish the intended PR base from an explicitly supplied ref, PR metadata, or reliable repository metadata.
 2. If the base cannot be determined confidently, ask a short question. Do not silently compare against an arbitrary `main`, `master`, or upstream branch.
-3. Calculate the merge base, then review the committed PR diff from that merge base to `HEAD`. State the base ref and merge base in the report.
-4. Inspect `git status --short`. Uncommitted or staged changes are not part of a PR by default. Review them only when requested, and report them separately from the committed PR diff.
-5. Check the diff for whitespace errors and merge-conflict markers. Identify binary, generated, vendored, lockfile, and large-file changes early; do not spend the same review effort on generated output as on hand-written source.
-6. Read applicable repository instructions and conventions before judging the change, including `AGENTS.md`, `CONTRIBUTING.md`, README guidance, package manifests, formatter/linter/test configuration, and nearby code patterns.
+3. Calculate the merge base and review the committed range from that merge base to `HEAD`. State both in the report.
+4. Inspect `git status --short`. Uncommitted changes are excluded by default; include them only when requested, and report them separately.
+5. Inspect the diff summary first. Identify binary, generated, vendored, lockfile, and unusually large changes before reviewing file contents.
+6. Read applicable repository instructions and conventions. Start with relevant `AGENTS.md`, `CONTRIBUTING.md`, README guidance, package manifests, and nearby configuration or code patterns. Do not recursively read unrelated documentation.
 
-When the committed range is empty, say so clearly. If only uncommitted changes exist, do not describe the branch as PR-ready.
+If the committed range is empty, say so clearly. If only uncommitted changes exist, do not describe the branch as PR-ready.
 
-## Review workflow
+## Change map and specialist routing
 
-### 1. Build a change map
+Classify changed paths and their execution context. Apply review effort proportionately to risk, change size, and available evidence.
 
-Classify each changed path and select every applicable route below. A file can require more than one route: a Vue component, for example, needs source-code, frontend, and security review.
+Use available specialist skills only when they materially improve the review. Choose the smallest useful set rather than running a fixed checklist.
 
-| Changed content | Apply this route |
-| --- | --- |
-| Any changed path | Universal checks and the `security-review` skill |
-| Documentation: `*.md`, `*.mdx`, `*.rst`, `*.txt`, changelogs, guides, `docs/` | Documentation review |
-| Application or library source; server code; scripts; test files | Code and test review |
-| HTML and templates: `*.html`, `*.htm`, `*.vue`, `*.svelte`, `*.astro`; UI-bearing JSX/TSX; frontend styles | Frontend review |
-| Package manifests, lockfiles, dependency declarations | Dependency review |
-| CI/CD, Docker, deployment, environment examples, IaC, permissions, secrets configuration | Configuration and automation review |
-| Database schemas, migrations, data transformations, queues, jobs | Data and operational-change review |
-| Generated, vendored, minified, binary, or large files | Change-integrity review |
+Examples:
 
-Classify from the content and project layout, not only filename extensions. For example, a `.ts` file in a browser application can be frontend code, while a Markdown file containing executable setup instructions also needs technical accuracy checks.
+- Security-focused review for executable code, dependencies, authentication, user-controlled input, data handling, CI/CD, infrastructure, permissions, secrets, and sensitive configuration.
+- Documentation review for user instructions, guides, release notes, or technical reference material.
+- Frontend, accessibility, or web-quality review for rendered UI, templates, browser interactions, styles, or client-side data handling.
+- Dependency review for manifests, lockfiles, or declared external sources.
+- Operational review for schemas, migrations, background jobs, queues, or data transformations.
+- Change-integrity review for generated, vendored, minified, binary, or large files.
 
-### 2. Apply universal checks
+For documentation-only changes, perform a lightweight security check for exposed secrets and unsafe or misleading commands. For generated or opaque files, inspect provenance, metadata, and supporting source/configuration; state any limitation on content inspection.
 
-For every changed path:
+Record the specialist skills used and any relevant unavailable skill as a limitation. Do not treat unavailable tooling as a failed check.
 
-- Use the sibling `security-review` skill and follow its required workflow. Scope the review to the changed code and the context needed to trace its data flows. Include secrets exposure, injection, authorisation, unsafe input handling, dependency risk, CI/IaC permissions, and sensitive-data handling where relevant. For binary or opaque generated files, inspect their metadata, provenance, and supporting source/configuration; state that their contents could not be fully inspected if that is the case.
-- Check that the change is intentional, complete, and within the stated task. Flag accidental debug output, dead code, commented-out code, placeholder values, merge artefacts, unexplained generated churn, and unrelated formatting changes when they make review harder or hide risk.
-- Assess behaviour, error handling, input validation, backwards compatibility, and failure modes in the changed execution path. Follow calls into nearby unchanged code only as far as needed to verify the change.
-- Check that changed tests prove the intended behaviour and failure cases rather than merely increasing coverage. Identify missing tests only when the altered behaviour has a meaningful, testable risk.
-- Run the project’s established, relevant validation commands when they are available and safe. Prefer the narrowest useful tests, linting, type checks, builds, or static checks. Do not install, remove, or upgrade dependencies to make a check run.
-- Report actual command results separately from review judgement. A check that could not run is a limitation, not a pass.
+## Review
 
-Do not raise a finding solely because an unchanged surrounding line is imperfect. Explain when an existing issue becomes newly reachable or worse because of the branch.
+For each materially changed execution path, assess:
 
-### 3. Documentation review
+- Intent and completeness: whether the change appears deliberate, complete, and within the apparent task.
+- Correctness and failure modes: behaviour, error handling, input validation, compatibility, resource handling, and meaningful edge cases.
+- Security: credible attack paths involving secrets, injection, authorisation, unsafe inputs, dependency risk, CI/IaC permissions, and sensitive-data handling.
+- Tests: whether changed or existing tests prove the altered behaviour and meaningful failure cases. Flag missing tests only where the new risk is testable and significant.
+- Reviewability: accidental debug output, dead or commented-out code, placeholders, merge artefacts, unexplained generated churn, or unrelated formatting changes that hide risk.
+- Documentation accuracy: changed commands, paths, configuration names, prerequisites, links, and behaviour claims against the repository.
 
-For documentation changes:
+For user-facing changes, inspect semantics, labels, native controls, links versus buttons, keyboard and focus behaviour, form errors, loading/error/empty states, responsive layout, contrast, target size, and client-side data handling. Only make claims about live browser behaviour, performance metrics, or accessibility testing when those were actually exercised or measured; otherwise label observations as source-level hypotheses.
 
-- Proofread the changed prose for spelling, grammar, punctuation, clarity, and consistent terminology. Use the project’s established language and spelling convention; use UK English when none is defined.
-- Verify headings, lists, links, anchors, code fences, command examples, file paths, configuration names, version claims, and prerequisites against the repository.
-- Check that instructions are ordered, safe, and complete enough to follow. Flag stale behaviour claims, misleading commands, undocumented required configuration, and accidental secrets in examples.
-- Preserve deliberate product names, API identifiers, code symbols, and regional spelling. Do not report subjective wording preferences as defects.
+For configuration and automation changes, inspect triggers, path filters, working directories, permissions, secret references, trusted inputs, artifact handling, cache keys, failure behaviour, and whether the change could publish, deploy, broaden access, expose a service, alter authentication, or mutate production data.
 
-### 4. Code and test review
+For data or operational changes, inspect rollout compatibility, data-loss risk, ordering, locking/runtime cost, retries, idempotency, recovery, and rollback. Do not run migrations or mutate data.
 
-For hand-written code and tests:
+## Validation
 
-- Compare implementation choices with local patterns and project standards rather than imposing a new architecture or style.
-- Check interfaces, types, null/error paths, resource cleanup, concurrency or idempotency where applicable, logging, observability, and user-visible error behaviour.
-- Check changed tests for correct setup, assertions, isolation, determinism, and coverage of the newly introduced risk. Ensure tests would fail for the relevant broken behaviour.
-- Use existing formatter, linter, type-checker, test, and build commands where applicable. If the repository documents a verification sequence, follow it proportionately.
+Run established, safe validation commands when available. Prefer the narrowest useful command for the changed package or behaviour:
 
-### 5. Frontend review
+1. Focused tests, linting, type checks, or static checks for the changed area.
+2. Documented package-level validation.
+3. Broader repository checks only when the change warrants them and they are safe to run.
 
-For user-facing frontend changes, load and apply both sibling skills:
+Do not install, remove, or upgrade dependencies to make a check run. Do not run undocumented full-repository builds or test suites merely because they exist when a narrower established command covers the change.
 
-1. Use the `html` skill for changed markup and template structure. Check semantic elements, headings and landmarks, labels, native controls, links versus buttons, image text alternatives, keyboard use, visible focus, valid template bindings, and unnecessary wrapper markup. For JSX/TSX, apply the same semantic checks to rendered HTML without treating framework syntax as invalid HTML.
-2. Use the `web-quality-audit` skill for affected user-facing pages, components, or journeys. If a runnable local target and suitable route are available, gather equivalent live evidence and exercise the changed interaction. If not, carry out its source-level smoke checks and label all resulting performance, accessibility, SEO, and browser-behaviour observations as source hypotheses rather than measured results.
+Report actual command results separately from review judgement. A skipped or unavailable check is a limitation, not a pass.
 
-Also inspect responsive behaviour, loading/error/empty states, form validation and error announcements, contrast, target size, layout-shift risks, and client-side data handling when the change affects them. Never claim Lighthouse scores, Core Web Vitals, or live keyboard behaviour without actually measuring or exercising them.
+## Scale and context discipline
 
-### 6. Dependency review
+Start from the diff summary and prioritise hand-written source, changed behaviour, and files that drive generated output.
 
-For manifest and lockfile changes:
+For large, repetitive, generated, lockfile-heavy, or multi-package changes:
 
-- Confirm each dependency change supports the branch purpose and is consistent across the manifest and lockfile.
-- Flag unexpected broad lockfile churn, duplicate or obsolete dependencies, unpinned sources where project policy requires pinning, and runtime dependencies that should be development-only (or the reverse).
-- Run the package manager’s existing audit or validation command only when it is already available and safe to run. Do not mutate the lockfile or install packages merely to audit it.
-- Let the `security-review` skill assess known vulnerability, supply-chain, and secret-exposure concerns.
+- Summarise repetitive churn rather than inspecting every equivalent line.
+- Inspect representative samples plus the sources, manifests, or configuration that produced the change.
+- Follow code into unchanged context only as far as needed to verify the altered behaviour.
+- State any unreviewed portion or evidence gap.
+- Ask the owner to narrow scope or provide a targeted focus when the available review budget cannot support a reliable whole-diff assessment.
 
-### 7. Configuration and automation review
-
-For CI/CD, Docker, environment, deployment, and infrastructure changes:
-
-- Check triggers, path filters, working directories, permissions, secret references, least privilege, trusted inputs, artifact handling, cache keys, and rollback or failure behaviour.
-- Check that examples contain placeholders rather than credentials and that default values are safe for their intended environment.
-- Flag changes that publish, deploy, broaden permissions, expose a service, alter authentication, or could mutate production data. Do not perform those actions during the review.
-
-### 8. Data and operational-change review
-
-For migrations, schemas, jobs, and data transformations:
-
-- Check compatibility between old and new application versions during rollout, data loss risk, ordering, backfill strategy, locking or runtime cost, retries, idempotency, and rollback or recovery plans.
-- Check that migration and job tests use representative data and preserve constraints and invariants.
-- Identify operational checks a human must complete if code inspection cannot establish safety. Do not run migrations or mutate data.
-
-### 9. Generated and binary changes
-
-For generated, vendored, minified, binary, or large files:
-
-- Verify their source and regeneration path where available.
-- Review the inputs, manifest, configuration, or source files that produced the output rather than attempting line-by-line review of generated content.
-- Flag unexpected output, size growth, missing source changes, generated secrets, or binaries that should not be committed.
+Keep findings concise. Include only actionable issues; use short evidence excerpts and summarise routine command output.
 
 ## Findings standard
 
-Report only issues that are credible and useful before a PR. Avoid style-only nits already enforced by automated tools, speculative vulnerabilities without an attack path, and generic advice unrelated to the diff.
+Report only credible and useful pre-PR issues. Avoid style-only nits already enforced by automated tools, speculative vulnerabilities without an attack path, and generic advice unrelated to the diff.
 
-For every finding, re-check the surrounding context and include:
+For every finding, include:
 
-- severity: `Must fix`, `Should fix`, `Question`, or `Note`;
-- category and exact `path:line` where possible;
-- evidence from the diff, code, command result, or live observation;
-- concrete impact; and
-- a concise, proportionate recommendation.
+- Severity: `Must fix`, `Should fix`, `Question`, or `Note`.
+- Category and exact `path:line` where possible.
+- Evidence from the diff, code, command result, or live observation.
+- Concrete impact.
+- A concise, proportionate recommendation.
 
 Use `Must fix` for clear correctness, security, data-loss, compatibility, or release-blocking failures. Use `Should fix` for credible risks that should normally be resolved before review. Use `Question` when intent or project context is required. Use `Note` sparingly for useful non-blocking observations.
 
-## Report structure
-
-Use this format unless the user requests another format:
+## Report format
 
 ```markdown
 # Pre-PR branch review
@@ -142,8 +110,10 @@ Ready for PR | Changes required before PR | Needs owner decision
 - Base: `<base ref>`; merge base: `<commit>`
 - Reviewed: `<committed diff range>`
 - Uncommitted changes: included | excluded | none
-- Change routes: documentation, code, frontend, security, ...
-- Commands run: `<command>` — pass | fail | not run (reason)
+- Change map: `<brief classification>`
+- Specialist skills used: `<skills>` | none
+- Commands run:
+  - `<command>` — pass | fail | not run (`reason`)
 
 ## Findings
 ### Must fix
@@ -162,18 +132,20 @@ Ready for PR | Changes required before PR | Needs owner decision
 - List only meaningful checks that were actually completed.
 
 ## Limitations and follow-up
-- State unavailable tools, skipped checks, missing test environments, and checks requiring a human or CI.
+- State skipped or unavailable tools/checks, unreviewed scope, missing test environments,
+  and checks requiring human or CI confirmation.
 ```
 
-If there are no findings, say `No pre-PR issues found in the reviewed scope`, then retain the scope, completed checks, and limitations. This is not a claim that the change is defect-free or a substitute for peer review.
+If there are no findings, state: `No pre-PR issues found in the reviewed scope.` Retain the completed checks and limitations. This is not a claim that the change is defect-free or a substitute for peer review.
 
 ## Completion criteria
 
 A review is complete when it has:
 
 - established and reported the correct comparison range;
-- inspected the changed paths and required local context;
-- run all applicable review routes, including `security-review` for relevant text-based changes;
-- applied `html` and `web-quality-audit` for applicable frontend work;
-- run or transparently skipped relevant project checks; and
-- provided a clear evidence-based decision without modifying the branch.
+- inspected changed paths and the local context needed to assess them;
+- applied proportionate universal and specialist review;
+- run or transparently skipped relevant safe validation;
+- identified evidence gaps; and
+- provided a clear, evidence-based decision without modifying the branch.
+```
