@@ -58,6 +58,8 @@ For configuration and automation changes, inspect triggers, path filters, workin
 
 For data or operational changes, inspect rollout compatibility, data-loss risk, ordering, locking/runtime cost, retries, idempotency, recovery, and rollback. Do not run migrations or mutate data.
 
+For reviewing field mappings, add a cross-layer contract check, trace each value from input through commands, handlers, serializers and external APIs, recording the exact key at every boundary. Only report a mismatch when the consumer contract is verified and no transformation explains the difference; otherwise raise it as a question.
+
 ## Validation
 
 Run established, safe validation commands when available. Prefer the narrowest useful command for the changed package or behaviour:
