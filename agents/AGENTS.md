@@ -58,7 +58,7 @@ Do not perform any of the following without explicit approval:
 - change authentication, authorisation, permissions, secrets, billing, or production configuration;
 - make external API calls that create, modify, or send data.
 
-Never create Git commits unless explicitly asked.
+Never create Git commits, create branches or push unless explicitly asked.
 
 Inspect Git status and diffs before editing when relevant. Do not overwrite or discard existing user changes.
 
