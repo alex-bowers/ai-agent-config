@@ -21,4 +21,11 @@ core-web-vitals|https://github.com/addyosmani/web-quality-skills.git|main|skills
 performance|https://github.com/addyosmani/web-quality-skills.git|main|skills/performance
 seo|https://github.com/addyosmani/web-quality-skills.git|main|skills/seo
 web-quality-audit|https://github.com/addyosmani/web-quality-skills.git|main|skills/web-quality-audit
+branch-review|https://github.com/BlueBayTravel/ai-skills.git|main|branch-review
+github-descriptions|https://github.com/BlueBayTravel/ai-skills.git|main|github-descriptions
+github-issue-writer|https://github.com/BlueBayTravel/ai-skills.git|main|github-issue-writer
+html-challenge|https://github.com/BlueBayTravel/ai-skills.git|main|html-challenge
+investigations|https://github.com/BlueBayTravel/ai-skills.git|main|investigations
+skill-creator|https://github.com/BlueBayTravel/ai-skills.git|main|skill-creator
+security-review|https://github.com/BlueBayTravel/ai-skills.git|main|security-review
 writing-plans|https://github.com/obra/superpowers.git|main|skills/writing-plans
