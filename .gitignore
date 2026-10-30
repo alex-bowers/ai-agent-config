@@ -1,2 +1,3 @@
 .agent-config.local.env
 .test-tmp/
+.agent-config-cache/

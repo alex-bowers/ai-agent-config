@@ -1,0 +1,18 @@
+# name|Git repository|branch or tag|path within repository
+agents-sdk|https://github.com/cloudflare/skills.git|main|skills/agents-sdk
+cf-cli|https://github.com/cloudflare/skills.git|main|skills/cf-cli
+cloudflare-email-service|https://github.com/cloudflare/skills.git|main|skills/cloudflare-email-service
+cloudflare-one-migrations|https://github.com/cloudflare/skills.git|main|skills/cloudflare-one-migrations
+cloudflare-one|https://github.com/cloudflare/skills.git|main|skills/cloudflare-one
+cloudflare|https://github.com/cloudflare/skills.git|main|skills/cloudflare
+durable-objects|https://github.com/cloudflare/skills.git|main|skills/durable-objects
+gateway-workers|https://github.com/cloudflare/skills.git|main|skills/gateway-workers
+k2|https://github.com/cloudflare/skills.git|main|skills/k2
+sandbox-migrate-to-next|https://github.com/cloudflare/skills.git|main|skills/sandbox-migrate-to-next
+sandbox-next|https://github.com/cloudflare/skills.git|main|skills/sandbox-next
+sandbox-stable|https://github.com/cloudflare/skills.git|main|skills/sandbox-stable
+turnstile-spin|https://github.com/cloudflare/skills.git|main|skills/turnstile-spin
+web-perf|https://github.com/cloudflare/skills.git|main|skills/web-perf
+workers-best-practices|https://github.com/cloudflare/skills.git|main|skills/workers-best-practices
+wrangler|https://github.com/cloudflare/skills.git|main|skills/wrangler
+writing-plans|https://github.com/obra/superpowers.git|main|skills/writing-plans

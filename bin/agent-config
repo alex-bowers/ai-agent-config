@@ -19,6 +19,7 @@ usage() {
 Usage: agent-config <command> [options]
 
 Commands:
+  fetch     Download configured skills into the local cache.
   install   Create or repair selected symlinks.
   sync      Alias for install.
   doctor    Check selected canonical files and symlinks.
@@ -63,6 +64,127 @@ validate_vendor() {
   case "$1" in claude-code|codex|copilot|all) ;; *) die "unknown vendor: $1" ;; esac
 }
 
+cache_release() {
+  CACHE_RELEASE="$AGENT_CONFIG_CACHE_DIR/releases/.none"
+  [ -f "$AGENT_CONFIG_CACHE_DIR/current" ] || return 0
+  IFS= read -r release < "$AGENT_CONFIG_CACHE_DIR/current"
+  case "$release" in
+    ''|.|..|*[!a-zA-Z0-9._-]*) die "invalid cache release: $release" ;;
+  esac
+  CACHE_RELEASE="$AGENT_CONFIG_CACHE_DIR/releases/$release"
+  [ -d "$CACHE_RELEASE" ] || die "missing cache release: $CACHE_RELEASE"
+}
+
+release_in_use() {
+  release_to_check=$1
+  for adapter_file in "$AGENT_CONFIG_HOME"/adapters/*.env; do
+    [ -f "$adapter_file" ] || continue
+    SKILLS_ROOT=
+    . "$adapter_file"
+    for target in "$SKILLS_ROOT"/*; do
+      [ -L "$target" ] || continue
+      case "$(readlink "$target")" in "$release_to_check"/*) return 0 ;; esac
+    done
+  done
+  return 1
+}
+
+prune_cache() {
+  kept=0
+  ls -td "$AGENT_CONFIG_CACHE_DIR"/releases/release.?????? 2>/dev/null |
+    while IFS= read -r candidate; do
+      [ -d "$candidate" ] && [ ! -L "$candidate" ] || continue
+      if [ "$kept" -lt 3 ]; then
+        kept=$((kept + 1))
+        continue
+      fi
+      [ "$candidate" != "$CACHE_RELEASE" ] || continue
+      release_in_use "$candidate" && continue
+      if rm -rf "$candidate"; then
+        note "removed old cache release: $candidate"
+      else
+        printf 'warning: could not remove old cache release: %s\n' "$candidate" >&2
+      fi
+    done
+}
+
+check_managed_sources() {
+  [ -f "$SKILL_SOURCES_FILE" ] || return 0
+  while IFS='|' read -r managed_name managed_repo managed_ref managed_path managed_extra || [ -n "$managed_name$managed_repo$managed_ref$managed_path$managed_extra" ]; do
+    case "$managed_name" in ''|'#'*) continue ;; esac
+    if [ -f "$CACHE_RELEASE/$managed_name/SKILL.md" ] ||
+       [ -f "$AGENT_CONFIG_HOME/agents/skills/$managed_name/SKILL.md" ]; then
+      continue
+    fi
+    printf 'missing managed skill: %s (run fetch before sync)\n' "$managed_name" >&2
+    FAILED=1
+  done < "$SKILL_SOURCES_FILE"
+}
+
+fetch_skills() {
+  [ -f "$SKILL_SOURCES_FILE" ] || die "missing skill sources: $SKILL_SOURCES_FILE"
+  command -v git >/dev/null 2>&1 || die "git is required to fetch skills"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    note "would: fetch skills from $SKILL_SOURCES_FILE into $AGENT_CONFIG_CACHE_DIR"
+    return 0
+  fi
+
+  mkdir -p "$AGENT_CONFIG_CACHE_DIR/releases" || die "cannot create cache directory"
+  release_dir=$(mktemp -d "$AGENT_CONFIG_CACHE_DIR/releases/release.XXXXXX") || die "cannot create cache release"
+  work_dir=$(mktemp -d "$AGENT_CONFIG_CACHE_DIR/.fetch.XXXXXX") || die "cannot create fetch directory"
+  trap 'rm -rf "$work_dir"; if [ "$published" -eq 0 ]; then rm -rf "$release_dir"; fi' EXIT HUP INT TERM
+  published=0
+  previous_repo= previous_ref= clone_dir= seen=' '
+
+  while IFS='|' read -r name repo ref path extra || [ -n "$name$repo$ref$path$extra" ]; do
+    case "$name" in ''|'#'*) continue ;; esac
+    case "$name" in *[!a-z0-9-]*|-*|*-) die "invalid skill name: $name" ;; esac
+    [ -n "$repo" ] && [ -n "$ref" ] && [ -n "$path" ] && [ -z "$extra" ] || die "invalid skill source: $name"
+    case "$repo" in https://*|ssh://*|git@*:*|/*) ;; *) die "invalid Git repository: $repo" ;; esac
+    case "$path" in /*|*/|*'//'*|.|..|./*|../*|*/./*|*/../*|*/.|*/..) die "invalid skill path: $path" ;; esac
+    case "$seen" in *" $name "*) die "duplicate skill source: $name" ;; esac
+    seen="$seen$name "
+
+    if [ "$repo" != "$previous_repo" ] || [ "$ref" != "$previous_ref" ]; then
+      clone_dir="$work_dir/repo"
+      if [ -d "$clone_dir" ]; then rm -rf "$clone_dir"; fi
+      case "$repo" in
+        /*) git clone --quiet --branch "$ref" "$repo" "$clone_dir" ;;
+        *) git clone --quiet --depth 1 --branch "$ref" "$repo" "$clone_dir" ;;
+      esac || die "cannot fetch $repo at $ref"
+      previous_repo=$repo previous_ref=$ref
+    fi
+    source="$clone_dir/$path"
+    remainder=$path probe=$clone_dir
+    while :; do
+      part=${remainder%%/*}
+      probe="$probe/$part"
+      [ ! -L "$probe" ] || die "skill path contains a symlink: $path"
+      [ "$remainder" != "$part" ] || break
+      remainder=${remainder#*/}
+    done
+    [ -f "$source/SKILL.md" ] || die "missing SKILL.md in $repo at $path"
+    if [ -n "$(find "$source" -type l -print -quit)" ]; then
+      die "skill contains symlinks: $path"
+    fi
+    cp -R "$source" "$release_dir/$name" || die "cannot cache skill: $name"
+    revision=$(git -C "$clone_dir" rev-parse HEAD) || die "cannot identify fetched revision"
+    printf '%s|%s|%s|%s|%s\n' "$name" "$repo" "$ref" "$path" "$revision" >> "$release_dir/.sources"
+    note "fetched: $name ($(printf '%.7s' "$revision"))"
+  done < "$SKILL_SOURCES_FILE"
+
+  [ "$seen" != ' ' ] || die "no skill sources in $SKILL_SOURCES_FILE"
+  pointer=$(mktemp "$AGENT_CONFIG_CACHE_DIR/.current.XXXXXX") || die "cannot create cache pointer"
+  printf '%s\n' "$(basename "$release_dir")" > "$pointer"
+  mv -f "$pointer" "$AGENT_CONFIG_CACHE_DIR/current" || die "cannot publish cache release"
+  published=1
+  rm -rf "$work_dir"
+  trap - EXIT HUP INT TERM
+  cache_release
+  prune_cache
+  note "cache ready: $release_dir"
+}
+
 run_or_print() {
   if [ "$DRY_RUN" -eq 1 ]; then
     note "would: $*"
@@ -81,14 +203,28 @@ link_one() {
     return 0
   fi
   if [ -e "$destination" ] || [ -L "$destination" ]; then
-    if [ "$FORCE" -ne 1 ]; then
-      die "destination exists: $destination (use --force to replace this selected target)"
+    if [ -L "$destination" ]; then
+      current=$(readlink "$destination")
+      name=$(basename "$destination")
+      case "$current" in
+        "$AGENT_CONFIG_HOME/agents/skills/$name"|"$AGENT_CONFIG_CACHE_DIR/releases/"*/"$name")
+          run_or_print rm "$destination"
+          ;;
+        *)
+          [ "$FORCE" -eq 1 ] || die "destination exists: $destination (use --force to replace this selected target)"
+          run_or_print rm "$destination"
+          ;;
+      esac
+    else
+      [ "$FORCE" -eq 1 ] || die "destination exists: $destination (use --force to replace this selected target)"
+      run_or_print rm -rf "$destination"
     fi
-    run_or_print rm -rf "$destination"
   fi
   run_or_print mkdir -p "$(dirname "$destination")"
   run_or_print ln -s "$source" "$destination"
-  note "linked: $destination -> $source"
+  if [ "$DRY_RUN" -ne 1 ]; then
+    note "linked: $destination -> $source"
+  fi
 }
 
 doctor_one() {
@@ -109,6 +245,27 @@ doctor_one() {
   note "healthy: $destination"
 }
 
+prune_obsolete_links() {
+  for target in "$SKILLS_ROOT"/*; do
+    [ -L "$target" ] || continue
+    name=$(basename "$target")
+    case "$seen" in *" $name "*) continue ;; esac
+    current=$(readlink "$target")
+    case "$current" in
+      "$AGENT_CONFIG_HOME/agents/skills/$name"|"$AGENT_CONFIG_CACHE_DIR/releases/"*/"$name")
+        case "$COMMAND" in
+          install|sync)
+            run_or_print rm "$target"
+            [ "$DRY_RUN" -eq 1 ] || note "removed obsolete link: $target"
+            ;;
+          doctor) printf 'obsolete managed symlink: %s\n' "$target" >&2; FAILED=1 ;;
+          status) note "$ADAPTER_ID obsolete skill: $target -> $current" ;;
+        esac
+        ;;
+    esac
+  done
+}
+
 handle_adapter() {
   adapter=$1
   adapter_file="$AGENT_CONFIG_HOME/adapters/$adapter.env"
@@ -117,15 +274,20 @@ handle_adapter() {
   . "$adapter_file"
   [ "$ADAPTER_ID" ] || die "adapter has no ID: $adapter_file"
 
-  for skill in "$AGENT_CONFIG_HOME"/agents/skills/*; do
+  seen=' '
+  for skill in "$CACHE_RELEASE"/* "$AGENT_CONFIG_HOME"/agents/skills/*; do
     [ -d "$skill" ] || continue
-    target="$SKILLS_ROOT/$(basename "$skill")"
+    name=$(basename "$skill")
+    case "$seen" in *" $name "*) continue ;; esac
+    seen="$seen$name "
+    target="$SKILLS_ROOT/$name"
     case "$COMMAND" in
       install|sync) link_one "$skill" "$target" ;;
       doctor) doctor_one "$skill" "$target" || FAILED=1 ;;
       status) note "$ADAPTER_ID skill: $target -> $skill" ;;
     esac
   done
+  prune_obsolete_links
   if [ -n "$INSTRUCTIONS_TARGET" ]; then
     source="$AGENT_CONFIG_HOME/agents/AGENTS.md"
     case "$COMMAND" in
@@ -139,14 +301,27 @@ handle_adapter() {
 validate_vendor "$VENDOR"
 case "$COMMAND" in
   help) usage ;;
+  fetch)
+    [ "$VENDOR" = all ] || die "fetch downloads sources for all vendors; omit --vendor"
+    [ "$FORCE" -eq 0 ] || die "--force does not apply to fetch"
+    fetch_skills
+    ;;
   install|sync|doctor|status)
     FAILED=0
+    cache_release
+    check_managed_sources
+    if [ "$FAILED" -ne 0 ] && [ "$COMMAND" != doctor ]; then
+      exit "$FAILED"
+    fi
     case "$VENDOR" in
       all) for adapter in claude-code openai-codex github-copilot; do handle_adapter "$adapter"; done ;;
       claude-code) handle_adapter claude-code ;;
       codex) handle_adapter openai-codex ;;
       copilot) handle_adapter github-copilot ;;
     esac
+    if [ "$FAILED" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
+      case "$COMMAND" in install|sync) prune_cache ;; esac
+    fi
     exit "$FAILED"
     ;;
   *) die "unknown command: $COMMAND" ;;
