@@ -15,4 +15,10 @@ turnstile-spin|https://github.com/cloudflare/skills.git|main|skills/turnstile-sp
 web-perf|https://github.com/cloudflare/skills.git|main|skills/web-perf
 workers-best-practices|https://github.com/cloudflare/skills.git|main|skills/workers-best-practices
 wrangler|https://github.com/cloudflare/skills.git|main|skills/wrangler
+accessibility|https://github.com/addyosmani/web-quality-skills.git|main|skills/accessibility
+best-practices|https://github.com/addyosmani/web-quality-skills.git|main|skills/best-practices
+core-web-vitals|https://github.com/addyosmani/web-quality-skills.git|main|skills/core-web-vitals
+performance|https://github.com/addyosmani/web-quality-skills.git|main|skills/performance
+seo|https://github.com/addyosmani/web-quality-skills.git|main|skills/seo
+web-quality-audit|https://github.com/addyosmani/web-quality-skills.git|main|skills/web-quality-audit
 writing-plans|https://github.com/obra/superpowers.git|main|skills/writing-plans
