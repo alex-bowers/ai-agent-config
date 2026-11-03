@@ -24,6 +24,7 @@ web-quality-audit|https://github.com/addyosmani/web-quality-skills.git|main|skil
 writing-plans|https://github.com/obra/superpowers.git|main|skills/writing-plans
 security-review|https://github.com/github/awesome-copilot.git|main|skills/security-review
 branch-review|https://github.com/BlueBayTravel/ai-skills.git|main|skills/branch-review
+branch-security-review|https://github.com/BlueBayTravel/ai-skills.git|main|skills/branch-security-review
 github-descriptions|https://github.com/BlueBayTravel/ai-skills.git|main|skills/github-descriptions
 github-issue-writer|https://github.com/BlueBayTravel/ai-skills.git|main|skills/github-issue-writer
 html-challenge|https://github.com/BlueBayTravel/ai-skills.git|main|skills/html-challenge
