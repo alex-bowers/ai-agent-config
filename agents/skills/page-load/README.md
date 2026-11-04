@@ -26,14 +26,15 @@ Use $page-load to capture https://example.test/
 After changing the page, ask Codex to capture the same URL again and compare it
 with the previous capture. Ask it to explain the comparison if you want code
 suggestions. Capturing through Codex uses AI to run the command, but the command
-itself gathers and processes the browser data without AI.
+itself gathers and processes the browser data without AI. Codex opens the
+generated HTML report in Chrome; the file link remains available for later.
 
 On macOS, Codex may ask you to approve local process access before capture so
 it can launch headless Chrome. Approving that command avoids a failed launch
 inside Codex's command sandbox. If approval is unavailable, run the capture
 from your VS Code terminal and ask Codex to interpret the saved result. The
-comparison command does not launch Chrome. Do not turn off Chrome's own sandbox
-or certificate checks.
+comparison command only needs browser access when opening its report. Do not
+turn off Chrome's own sandbox or certificate checks.
 
 ## Use from the terminal
 
@@ -44,11 +45,23 @@ node ~/.codex/skills/page-load/scripts/page-load.mjs capture 'https://example.te
 node ~/.codex/skills/page-load/scripts/page-load.mjs compare '.page-load/<before>' '.page-load/<after>'
 ```
 
+Add `--open` to either command to open its report in Chrome on macOS. To open an
+existing report, run `open -a 'Google Chrome' '/path/to/report.html'`.
+
 The command prints the report path. Each capture makes three visits with an
 empty browser cache and continues recording for two seconds after the load
 event. The report lets you inspect request timing, initiators and failures, and
-filter or zoom the waterfall. A later request start alone does not prove that
-another asset blocked it.
+filter or zoom the waterfall. Select a request to open its details in a modal;
+press Escape or use Close to return to the waterfall. A later request start
+alone does not prove that another asset blocked it.
+
+The report also shows long animation frames of at least 50 ms above each
+waterfall. Where Chrome supplies it, the section lists script URLs and
+functions that contributed to those frames. This is a summary of slow
+main-thread work, not a full CPU trace or proof that a network request caused
+the delay. Some scripts, especially in cross-origin frames, have no source
+attribution. Existing captures made before this feature remain readable but
+need a new capture to show main-thread activity.
 
 ## Results and privacy
 

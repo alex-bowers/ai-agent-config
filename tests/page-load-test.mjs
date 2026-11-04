@@ -10,9 +10,11 @@ test('accepts only complete web URLs without embedded credentials', () => {
 });
 
 test('normalises request and milestone times relative to first event', () => {
+  const mainThread = { supported: true, frames: [{ startMs: 5, durationMs: 120, scripts: [] }] };
   const run = normaliseRun({
     capturedAt: '2026-11-04T00:00:00.000Z',
     timedOut: false,
+    mainThread,
     finished: 102,
     markers: { domContent: 100.5, load: 101 },
     requests: [{
@@ -26,6 +28,7 @@ test('normalises request and milestone times relative to first event', () => {
   assert.equal(run.durationMs, 2000);
   assert.deepEqual([run.requests[0].startMs, run.requests[0].responseMs, run.requests[0].endMs], [0, 300, 700]);
   assert.equal(run.requests[0].incomplete, false);
+  assert.deepEqual(run.mainThread, mainThread);
 });
 
 test('summarises repeated runs with medians', () => {
@@ -43,6 +46,14 @@ test('rejects malformed capture data', () => {
   assert.throws(() => validateCapture({ schemaVersion: 1, url: 'https://example.com', runs: [] }));
   assert.throws(() => validateCapture({ schemaVersion: 2, url: 'https://example.com', runs: [{ markers: {}, requests: [], durationMs: 0 }] }));
   assert.throws(() => validateCapture({ schemaVersion: 1, url: 'https://example.com', runs: [{ markers: {}, requests: [{ url: 'x' }], durationMs: 0 }] }));
+});
+
+test('accepts captures created before main-thread measurements were added', () => {
+  const capture = { schemaVersion: 1, url: 'https://example.com/', runs: [{
+    markers: { loadMs: 20 }, durationMs: 2020,
+    requests: [{ url: 'https://example.com/', startMs: 0, endMs: 20, sizeBytes: 100 }],
+  }] };
+  assert.equal(validateCapture(capture), capture);
 });
 
 test('escapes captured URLs before embedding JSON in HTML', async () => {

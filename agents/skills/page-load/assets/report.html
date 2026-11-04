@@ -37,7 +37,7 @@
     .scale { position: relative; min-height: 2rem; border-left: 1px solid #cbd5e1; }
     .tick { position: absolute; top: .4rem; color: #475569; transform: translateX(-50%); }
     .request-row { width: 100%; border: 0; border-bottom: 1px solid #e4e9f0; background: white; color: inherit; padding: 0; text-align: left; font: inherit; cursor: pointer; }
-    .request-row:hover, .request-row[aria-current="true"] { background: #eaf2ff; }
+    .request-row:hover, .request-row:focus-visible { background: #eaf2ff; }
     .request-row:last-child { border-bottom: 0; }
     .request-name { padding: .35rem .55rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .84rem; }
     .request-name small { display: block; color: #526176; }
@@ -51,10 +51,21 @@
     .marker.load { background: #b54708; }
     .legend { display: flex; flex-wrap: wrap; gap: .6rem 1rem; padding: .6rem 0; font-size: .82rem; color: #344055; }
     .legend span::before { content: ''; display: inline-block; width: .7rem; height: .7rem; margin-right: .35rem; background: var(--key); }
-    .details { margin-top: 1rem; border-top: 1px solid #dce3ed; padding-top: .75rem; }
-    .details dl { display: grid; grid-template-columns: auto 1fr; gap: .3rem 1rem; margin: 0; overflow-wrap: anywhere; }
-    .details dt { font-weight: 600; }
-    .details dd { margin: 0; }
+    .main-thread { margin: .8rem 0; padding: .75rem; border: 1px solid #dce3ed; border-radius: .4rem; background: #f8fafc; }
+    .main-thread h3 { margin: 0 0 .35rem; font-size: 1rem; }
+    .main-thread p { margin: .25rem 0 .5rem; }
+    .main-thread ol { margin: .35rem 0 .65rem; padding-left: 1.4rem; overflow-wrap: anywhere; }
+    .main-thread li { margin: .3rem 0; }
+    .main-thread details { margin-top: .5rem; }
+    .main-thread summary { cursor: pointer; font-weight: 600; }
+    .request-dialog { width: min(44rem, calc(100vw - 2rem)); max-height: 85dvh; padding: 1.25rem; border: 1px solid #78879b; border-radius: .65rem; background: white; color: #172033; box-shadow: 0 16px 50px #17203355; }
+    .request-dialog::backdrop { background: #172033a8; }
+    .request-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; }
+    .request-dialog h2 { margin: 0; }
+    .request-dialog button { padding: .4rem .7rem; border: 1px solid #78879b; border-radius: .35rem; background: white; color: inherit; font: inherit; cursor: pointer; }
+    .request-dialog dl { display: grid; grid-template-columns: minmax(7rem, auto) 1fr; gap: .4rem 1rem; margin: 0; overflow-wrap: anywhere; }
+    .request-dialog dt { font-weight: 600; }
+    .request-dialog dd { margin: 0; }
     .empty { padding: 1rem; }
     @media (max-width: 1100px) { .panels.compare { grid-template-columns: 1fr; } }
   </style>
@@ -76,6 +87,13 @@
     </div>
     <div class="legend" aria-label="Timing markers"><span style="--key:#14804a">DOM content loaded</span><span style="--key:#b54708">Load event</span><span style="--key:#17203355">Response download</span><span style="--key:#b42318">Failed request</span></div>
     <div class="panels" id="panels"></div>
+    <dialog class="request-dialog" id="request-dialog" aria-labelledby="request-dialog-title">
+      <header>
+        <h2 id="request-dialog-title">Request details</h2>
+        <button type="button" id="close-request">Close</button>
+      </header>
+      <div id="request-details"></div>
+    </dialog>
   </main>
   <script>
     'use strict';
@@ -107,6 +125,10 @@
     const name = (url) => { try { const parsed = new URL(url); return `${parsed.pathname.split('/').pop() || '/'}${parsed.search}`; } catch { return url; } };
     const colours = { Document: '#3855a6', Script: '#7551a8', Stylesheet: '#a34482', Image: '#22799b', Font: '#9b6228', XHR: '#347a64', Fetch: '#347a64', Media: '#976728' };
     const panels = [];
+    const requestDialog = $('#request-dialog');
+    let dialogTrigger;
+    $('#close-request').addEventListener('click', () => requestDialog.close());
+    requestDialog.addEventListener('close', () => { if (dialogTrigger?.isConnected) dialogTrigger.focus(); });
 
     function tableCell(row, tag, value) { row.append(element(tag, '', value)); }
     function drawSummary() {
@@ -131,7 +153,6 @@
 
     function appendDetails(container, request, run) {
       container.replaceChildren();
-      container.append(element('h3', '', 'Request details'));
       const list = element('dl');
       const fields = [
         ['URL', request.url], ['Method', request.method], ['Type', request.type], ['Status', request.status ?? '—'],
@@ -150,6 +171,62 @@
       }
       for (const [key, value] of fields) { list.append(element('dt', '', key), element('dd', '', value)); }
       container.append(list);
+    }
+
+    function drawMainThread(container, run) {
+      container.replaceChildren(element('h3', '', 'Main thread activity'));
+      const measurement = run.mainThread;
+      if (!measurement) {
+        container.append(element('p', 'muted', 'This older capture did not record main-thread activity. Capture the page again to see it.'));
+        return;
+      }
+      if (!measurement.supported || !Array.isArray(measurement.frames)) {
+        container.append(element('p', 'muted', 'Long animation frame data was unavailable for this run.'));
+        return;
+      }
+      const frames = measurement.frames;
+      if (!frames.length) {
+        container.append(element('p', 'muted', 'No frames of 50 ms or longer were recorded. Shorter main-thread work is not shown.'));
+        return;
+      }
+      container.append(element('p', '', `${frames.length} frame${frames.length === 1 ? '' : 's'} took at least 50 ms. Script sources below are entry points and may not identify the function that used the most time.`));
+      const sources = new Map();
+      for (const frame of frames) {
+        for (const script of frame.scripts || []) {
+          if (!script.sourceURL) continue;
+          sources.set(script.sourceURL, (sources.get(script.sourceURL) || 0) + script.durationMs);
+        }
+      }
+      if (sources.size) {
+        container.append(element('p', 'muted', 'Most attributed script time within long frames:'));
+        const top = element('ol');
+        for (const [url, duration] of [...sources].sort((a, b) => b[1] - a[1]).slice(0, 3)) {
+          top.append(element('li', '', `${url} · ${formatMs(duration)}`));
+        }
+        container.append(top);
+      } else {
+        container.append(element('p', 'muted', 'Chrome did not provide script attribution for these frames.'));
+      }
+      const more = element('details');
+      more.append(element('summary', '', 'Show frame timings and scripts'));
+      const list = element('ol');
+      for (const frame of [...frames].sort((a, b) => b.durationMs - a.durationMs)) {
+        const item = element('li', '', `${formatMs(frame.durationMs)} frame at ${formatMs(frame.startMs)} after navigation; ${formatMs(frame.blockingDurationMs)} blocking duration`);
+        if (frame.scripts?.length) {
+          const scripts = element('ul');
+          for (const script of [...frame.scripts].sort((a, b) => b.durationMs - a.durationMs)) {
+            const source = script.sourceURL || 'Unattributed script';
+            const functionName = script.functionName ? ` (${script.functionName})` : '';
+            scripts.append(element('li', '', `${source}${functionName} · ${formatMs(script.durationMs)}; forced style/layout ${formatMs(script.forcedStyleAndLayoutMs)}`));
+          }
+          item.append(scripts);
+        }
+        list.append(item);
+      }
+      more.append(list);
+      container.append(more);
+      if (measurement.truncated) container.append(element('p', 'muted', 'Chrome may have omitted later frames after its performance buffer filled.'));
+      container.append(element('p', 'muted', 'This is a slow-frame summary, not a full CPU trace. Use Chrome DevTools Performance for complete call stacks and rendering work.'));
     }
 
     function appendMarker(track, value, scale, kind) {
@@ -173,7 +250,7 @@
       const scale = $('#zoom').value === 'auto' ? Math.max(100, run.markers.loadMs || 0, ...run.requests.map((request) => request.endMs)) * 1.08 : Number($('#zoom').value);
       panel.meta.textContent = `${requests.length} of ${run.requests.length} requests · ${run.timedOut ? 'Load event timed out' : 'Captured through 2 seconds after load'}`;
       panel.list.replaceChildren();
-      panel.details.replaceChildren(element('p', 'muted', 'Select a request to see its details.'));
+      drawMainThread(panel.mainThread, run);
       const timeline = element('div', 'timeline');
       timeline.append(element('div', '', 'Request'));
       const ticks = element('div', 'scale');
@@ -188,6 +265,7 @@
       for (const request of requests) {
         const row = element('button', 'request-row');
         row.type = 'button';
+        row.setAttribute('aria-haspopup', 'dialog');
         row.setAttribute('aria-label', `${request.type} ${request.url}, ${formatMs(request.startMs)} to ${formatMs(request.endMs)}`);
         const label = element('span', 'request-name', name(request.url));
         const via = request.initiator?.url ? ` · via ${name(request.initiator.url)}` : '';
@@ -208,9 +286,11 @@
         track.append(bar);
         row.append(label, track);
         row.addEventListener('click', () => {
-          panel.list.querySelectorAll('[aria-current]').forEach((selected) => selected.removeAttribute('aria-current'));
-          row.setAttribute('aria-current', 'true');
-          appendDetails(panel.details, request, run);
+          dialogTrigger = row;
+          appendDetails($('#request-details'), request, run);
+          requestDialog.scrollTop = 0;
+          requestDialog.showModal();
+          $('#close-request').focus();
         });
         panel.list.append(row);
       }
@@ -236,13 +316,12 @@
       section.append(controls);
       const meta = element('p', 'muted');
       section.append(meta);
+      const mainThread = element('section', 'main-thread');
+      section.append(mainThread);
       const list = element('div', 'scroll');
       section.append(list);
-      const details = element('section', 'details');
-      details.setAttribute('aria-live', 'polite');
-      section.append(details);
       $('#panels').append(section);
-      const panel = { capture, select, meta, list, details };
+      const panel = { capture, select, meta, mainThread, list };
       select.addEventListener('change', () => drawPanel(panel));
       panels.push(panel);
       drawPanel(panel);

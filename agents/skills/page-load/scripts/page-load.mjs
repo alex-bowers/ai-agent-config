@@ -199,6 +199,7 @@ export function normaliseRun(raw) {
     timedOut: raw.timedOut,
     durationMs: ms(raw.finished),
     markers: { domContentMs: ms(raw.markers.domContent), loadMs: ms(raw.markers.load) },
+    mainThread: raw.mainThread,
     requests: raw.requests.map((request, index) => ({
       id: index + 1,
       url: request.url,
@@ -217,6 +218,38 @@ export function normaliseRun(raw) {
       fromCache: Boolean(request.fromCache),
     })),
   };
+}
+
+async function readMainThread(cdp, sessionId) {
+  const expression = `(() => {
+    if (typeof PerformanceObserver === 'undefined' ||
+        !PerformanceObserver.supportedEntryTypes.includes('long-animation-frame')) {
+      return { supported: false, frames: [] };
+    }
+    const entries = performance.getEntriesByType('long-animation-frame');
+    return {
+      supported: true,
+      truncated: entries.length >= 200,
+      frames: entries.map((frame) => ({
+        startMs: Math.round(frame.startTime),
+        durationMs: Math.round(frame.duration),
+        blockingDurationMs: Math.round(frame.blockingDuration || 0),
+        scripts: (frame.scripts || []).map((script) => ({
+          sourceURL: script.sourceURL || null,
+          functionName: script.sourceFunctionName || null,
+          durationMs: Math.round(script.duration),
+          forcedStyleAndLayoutMs: Math.round(script.forcedStyleAndLayoutDuration || 0),
+        })),
+      })),
+    };
+  })()`;
+  try {
+    const result = await cdp.send('Runtime.evaluate', { expression, returnByValue: true }, sessionId);
+    if (result.exceptionDetails || !result.result?.value) return { supported: false, frames: [] };
+    return result.result.value;
+  } catch {
+    return { supported: false, frames: [] };
+  }
 }
 
 async function captureRun(cdp, url) {
@@ -302,7 +335,8 @@ async function captureRun(cdp, url) {
     }
     const finished = markers.load ? markers.load + POST_LOAD_MS / 1000 :
       Math.max(...requests.map((request) => request.ended || request.started), 0);
-    return normaliseRun({ capturedAt: new Date().toISOString(), timedOut, requests, markers, finished });
+    const mainThread = await readMainThread(cdp, sessionId);
+    return normaliseRun({ capturedAt: new Date().toISOString(), timedOut, requests, markers, finished, mainThread });
   } finally {
     removeListener();
     await cdp.send('Target.disposeBrowserContext', { browserContextId }).catch(() => {});
@@ -332,7 +366,27 @@ async function readCapture(input) {
   return validateCapture(JSON.parse(await readFile(file, 'utf8')));
 }
 
-async function commandCapture(urlInput) {
+async function openReport(reportPath) {
+  const command = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = process.platform === 'darwin' ? ['-a', 'Google Chrome', reportPath] : [reportPath];
+  await new Promise((resolve, reject) => {
+    const opener = spawn(command, args, { stdio: 'ignore' });
+    opener.once('error', reject);
+    opener.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`${command} exited with code ${code}`)));
+  });
+}
+
+async function showReport(reportPath, shouldOpen) {
+  if (!shouldOpen) return;
+  try {
+    await openReport(reportPath);
+    process.stdout.write('Opened report in the browser.\n');
+  } catch (error) {
+    process.stderr.write(`Could not open the report in a browser: ${error.message}\nOpen ${reportPath} manually.\n`);
+  }
+}
+
+async function commandCapture(urlInput, shouldOpen) {
   const url = validateUrl(urlInput);
   const chrome = await startChrome();
   const runs = [];
@@ -354,30 +408,36 @@ async function commandCapture(urlInput) {
   };
   const root = await ensureResultsRoot(process.cwd());
   const directory = await saveReport(root, 'capture', { mode: 'capture', captures: [capture] }, capture);
+  const reportPath = path.join(directory, 'report.html');
   const summary = summarise(capture);
-  process.stdout.write(`${directory}\n${path.join(directory, 'report.html')}\nMedian load event: ${summary.loadMs ?? 'unavailable'} ms; requests: ${summary.requestCount}; transferred: ${Math.round(summary.transferBytes / 1024)} KiB\n`);
+  process.stdout.write(`${directory}\n${reportPath}\nMedian load event: ${summary.loadMs ?? 'unavailable'} ms; requests: ${summary.requestCount}; transferred: ${Math.round(summary.transferBytes / 1024)} KiB\n`);
+  await showReport(reportPath, shouldOpen);
 }
 
-async function commandCompare(beforePath, afterPath) {
+async function commandCompare(beforePath, afterPath, shouldOpen) {
   const before = await readCapture(beforePath);
   const after = await readCapture(afterPath);
   const root = await ensureResultsRoot(process.cwd());
   const directory = await saveReport(root, 'comparison', { mode: 'compare', captures: [before, after] });
+  const reportPath = path.join(directory, 'report.html');
   const first = summarise(before);
   const second = summarise(after);
   const delta = Number.isFinite(first.loadMs) && Number.isFinite(second.loadMs) ? `${second.loadMs - first.loadMs} ms` : 'unavailable';
-  process.stdout.write(`${directory}\n${path.join(directory, 'report.html')}\nMedian load-event change: ${delta}\n`);
+  process.stdout.write(`${directory}\n${reportPath}\nMedian load-event change: ${delta}\n`);
+  await showReport(reportPath, shouldOpen);
 }
 
 function usage() {
-  return 'Usage:\n  page-load capture <http(s)://url>\n  page-load compare <before-capture-directory-or-json> <after-capture-directory-or-json>\n';
+  return 'Usage:\n  page-load capture <http(s)://url> [--open]\n  page-load compare <before-capture-directory-or-json> <after-capture-directory-or-json> [--open]\n';
 }
 
 async function main(args) {
-  if (args[0] === 'capture' && args.length === 2) return commandCapture(args[1]);
-  if (args[0] === 'compare' && args.length === 3) return commandCompare(args[1], args[2]);
+  const shouldOpen = args.at(-1) === '--open';
+  const commandArgs = shouldOpen ? args.slice(0, -1) : args;
+  if (commandArgs[0] === 'capture' && commandArgs.length === 2) return commandCapture(commandArgs[1], shouldOpen);
+  if (commandArgs[0] === 'compare' && commandArgs.length === 3) return commandCompare(commandArgs[1], commandArgs[2], shouldOpen);
   process.stdout.write(usage());
-  if (args[0] && !['--help', '-h', 'help'].includes(args[0])) process.exitCode = 2;
+  if (commandArgs[0] && !['--help', '-h', 'help'].includes(commandArgs[0])) process.exitCode = 2;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
