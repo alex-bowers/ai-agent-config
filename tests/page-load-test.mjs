@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { normaliseRun, renderReport, summarise, validateCapture, validateUrl } from '../agents/skills/page-load/scripts/page-load.mjs';
+import { normaliseRun, parseViewport, renderReport, summarise, validateCapture, validateUrl } from '../agents/skills/page-load/scripts/page-load.mjs';
+
+test('resolves named viewport presets and explicit CSS pixel dimensions', () => {
+  assert.deepEqual(parseViewport('mobile'), { width: 390, height: 844 });
+  assert.deepEqual(parseViewport('tablet'), { width: 768, height: 1024 });
+  assert.deepEqual(parseViewport('desktop'), { width: 1440, height: 900 });
+  assert.deepEqual(parseViewport('390x844'), { width: 390, height: 844 });
+  for (const value of ['phone', 'Mobile', '390', '390X844', '390x0', '0x844', '10001x844', '390x10001', '390x844px', '1.5x844']) {
+    assert.throws(() => parseViewport(value));
+  }
+});
 
 test('accepts only complete web URLs without embedded credentials', () => {
   assert.equal(validateUrl('https://bluebaytravel.test/path#section'), 'https://bluebaytravel.test/path');

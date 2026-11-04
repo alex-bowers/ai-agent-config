@@ -42,11 +42,20 @@ From the website repository, run:
 
 ```sh
 node ~/.codex/skills/page-load/scripts/page-load.mjs capture 'https://example.test/'
+node ~/.codex/skills/page-load/scripts/page-load.mjs capture 'https://example.test/' --viewport mobile
 node ~/.codex/skills/page-load/scripts/page-load.mjs compare '.page-load/<before>' '.page-load/<after>'
 ```
 
 Add `--open` to either command to open its report in Chrome on macOS. To open an
 existing report, run `open -a 'Google Chrome' '/path/to/report.html'`.
+
+The optional `--viewport` accepts `mobile` (390×844 CSS pixels), `tablet`
+(768×1024) or `desktop` (1440×900). You can still pass explicit dimensions,
+such as `--viewport 390x844`. These options set a responsive viewport for each
+run; they do not emulate a mobile device, touch input or a mobile user agent.
+Without the option, Chrome uses its default viewport. Captures record the
+viewport dimensions, and comparison reports flag different settings. Use the
+same viewport when comparing page changes.
 
 The command prints the report path. Each capture makes three visits with an
 empty browser cache and continues recording for two seconds after the load

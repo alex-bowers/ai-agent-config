@@ -399,6 +399,10 @@
       const section = element('section', 'panel card');
       section.append(element('h2', '', data.mode === 'compare' ? (index ? 'After' : 'Before') : 'Capture'));
       section.append(element('p', 'muted', capture.url));
+      const viewport = capture.settings?.viewport;
+      section.append(element('p', 'muted', viewport ?
+        `Viewport: ${viewport.width} × ${viewport.height} CSS pixels (desktop Chrome)` :
+        'Viewport: Chrome default (dimensions not recorded)'));
       const controls = element('div', 'panel-controls');
       const label = element('label', '', 'Run');
       const select = element('select');
@@ -422,6 +426,10 @@
     }
 
     $('#intro').textContent = data.mode === 'compare' ? 'Comparison of two cold-cache captures. Values are medians across runs.' : 'Cold-cache capture. Values are medians across runs.';
+    if (data.mode === 'compare' && JSON.stringify(data.captures[0].settings?.viewport || null) !==
+        JSON.stringify(data.captures[1].settings?.viewport || null)) {
+      $('#intro').textContent += ' Viewport settings differ; timing differences may reflect layout changes.';
+    }
     if (data.mode === 'compare') $('#panels').classList.add('compare');
     drawSummary();
     populateFilters();

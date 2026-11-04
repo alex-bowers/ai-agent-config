@@ -13,6 +13,24 @@ const REPORT_TEMPLATE = path.resolve(SCRIPT_DIR, '../assets/report.html');
 const RUN_COUNT = 3;
 const POST_LOAD_MS = 2000;
 const TIMEOUT_MS = 45000;
+const VIEWPORT_PRESETS = {
+  mobile: { width: 390, height: 844 },
+  tablet: { width: 768, height: 1024 },
+  desktop: { width: 1440, height: 900 },
+};
+
+export function parseViewport(value) {
+  if (Object.hasOwn(VIEWPORT_PRESETS, value)) return { ...VIEWPORT_PRESETS[value] };
+  const match = /^(\d+)x(\d+)$/.exec(value || '');
+  if (!match) throw new Error('Viewport must be mobile, tablet, desktop or WIDTHxHEIGHT in CSS pixels.');
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) ||
+      width < 1 || height < 1 || width > 10000 || height > 10000) {
+    throw new Error('Viewport width and height must each be between 1 and 10000 CSS pixels.');
+  }
+  return { width, height };
+}
 
 export function validateUrl(value) {
   let url;
@@ -310,7 +328,7 @@ async function readMainThread(cdp, sessionId) {
   }
 }
 
-async function captureRun(cdp, url) {
+async function captureRun(cdp, url, viewport) {
   const { browserContextId } = await cdp.send('Target.createBrowserContext');
   let removeListener = () => {};
   try {
@@ -319,6 +337,11 @@ async function captureRun(cdp, url) {
     await cdp.send('Page.enable', {}, sessionId);
     await cdp.send('Network.enable', {}, sessionId);
     await cdp.send('Network.setCacheDisabled', { cacheDisabled: true }, sessionId);
+    if (viewport) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        ...viewport, deviceScaleFactor: 1, mobile: false,
+      }, sessionId);
+    }
 
     const requests = [];
     const current = new Map();
@@ -449,14 +472,14 @@ async function showReport(reportPath, shouldOpen) {
   }
 }
 
-async function commandCapture(urlInput, shouldOpen) {
+async function commandCapture(urlInput, shouldOpen, viewport) {
   const url = validateUrl(urlInput);
   const chrome = await startChrome();
   const runs = [];
   try {
     for (let index = 0; index < RUN_COUNT; index++) {
       process.stderr.write(`Capture ${index + 1}/${RUN_COUNT}: ${url}\n`);
-      runs.push(await captureRun(chrome.cdp, url));
+      runs.push(await captureRun(chrome.cdp, url, viewport));
     }
   } finally {
     chrome.cdp.close();
@@ -466,7 +489,7 @@ async function commandCapture(urlInput, shouldOpen) {
     schemaVersion: 1,
     url,
     capturedAt: new Date().toISOString(),
-    settings: { runs: RUN_COUNT, postLoadMs: POST_LOAD_MS, timeoutMs: TIMEOUT_MS, cache: 'empty' },
+    settings: { runs: RUN_COUNT, postLoadMs: POST_LOAD_MS, timeoutMs: TIMEOUT_MS, cache: 'empty', viewport: viewport || null },
     runs,
   };
   const root = await ensureResultsRoot(process.cwd());
@@ -480,6 +503,9 @@ async function commandCapture(urlInput, shouldOpen) {
 async function commandCompare(beforePath, afterPath, shouldOpen) {
   const before = await readCapture(beforePath);
   const after = await readCapture(afterPath);
+  if (JSON.stringify(before.settings?.viewport || null) !== JSON.stringify(after.settings?.viewport || null)) {
+    process.stderr.write('Warning: captures use different viewport settings; timing differences may reflect layout changes.\n');
+  }
   const root = await ensureResultsRoot(process.cwd());
   const directory = await saveReport(root, 'comparison', { mode: 'compare', captures: [before, after] });
   const reportPath = path.join(directory, 'report.html');
@@ -491,13 +517,17 @@ async function commandCompare(beforePath, afterPath, shouldOpen) {
 }
 
 function usage() {
-  return 'Usage:\n  page-load capture <http(s)://url> [--open]\n  page-load compare <before-capture-directory-or-json> <after-capture-directory-or-json> [--open]\n';
+  return 'Usage:\n  page-load capture <http(s)://url> [--viewport mobile|tablet|desktop|WIDTHxHEIGHT] [--open]\n  page-load compare <before-capture-directory-or-json> <after-capture-directory-or-json> [--open]\n';
 }
 
 async function main(args) {
-  const shouldOpen = args.at(-1) === '--open';
-  const commandArgs = shouldOpen ? args.slice(0, -1) : args;
-  if (commandArgs[0] === 'capture' && commandArgs.length === 2) return commandCapture(commandArgs[1], shouldOpen);
+  const shouldOpen = args.includes('--open');
+  const commandArgs = args.filter((arg) => arg !== '--open');
+  if (commandArgs[0] === 'capture' && (commandArgs.length === 2 ||
+      (commandArgs.length === 4 && commandArgs[2] === '--viewport'))) {
+    const viewport = commandArgs.length === 4 ? parseViewport(commandArgs[3]) : null;
+    return commandCapture(commandArgs[1], shouldOpen, viewport);
+  }
   if (commandArgs[0] === 'compare' && commandArgs.length === 3) return commandCompare(commandArgs[1], commandArgs[2], shouldOpen);
   process.stdout.write(usage());
   if (commandArgs[0] && !['--help', '-h', 'help'].includes(commandArgs[0])) process.exitCode = 2;

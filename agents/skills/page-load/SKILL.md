@@ -16,13 +16,13 @@ If approval is unavailable or denied, stop and give the user the terminal comman
 ## Capture
 
 1. Work from the website repository. If the target URL is missing, ask for it; do not guess a production URL.
-2. Run `node <skill-directory>/scripts/page-load.mjs capture <url> --open` from the repository root. Quote the URL as a single shell argument. The flag opens the generated report in Chrome after capture.
+2. Run `node <skill-directory>/scripts/page-load.mjs capture <url> --open` from the repository root. Quote the URL as a single shell argument. If the user requests a specific viewport, add `--viewport mobile`, `--viewport tablet` or `--viewport desktop` (390×844, 768×1024 and 1440×900 CSS pixels respectively). Explicit `WIDTHxHEIGHT` dimensions also work. These options change the responsive viewport in desktop Chrome; they do not emulate a mobile device, touch input or a mobile user agent. The `--open` flag opens the generated report in Chrome after capture.
 3. Give the user the report's local path and a short factual summary: run count, load-event median, request count, and any capture or browser-opening errors. The report also shows document time to first byte, First Contentful Paint, the latest Largest Contentful Paint candidate seen during the capture, and request/byte totals by resource type and host. If opening fails, give the user `open -a 'Google Chrome' '<report-path>'` on macOS instead of retrying. Do not interpret causes unless asked.
 4. Keep the directory path for a later comparison. The command runs Chrome three times with isolated browser state, waits two seconds after each load event, and stores no response bodies or headers.
 
 ## Compare
 
-1. After the code changes, capture the same page again under the same local or public environment.
+1. After the code changes, capture the same page again under the same local or public environment and with the same viewport setting. The report records viewport dimensions and flags a mismatch.
 2. Run `node <skill-directory>/scripts/page-load.mjs compare <before-directory> <after-directory> --open`. If browser access is unavailable, omit `--open` and give the user the report path and browser-opening command.
 3. Give the user the interactive comparison report and factual deltas. Do not make optimisation recommendations unless asked.
 
