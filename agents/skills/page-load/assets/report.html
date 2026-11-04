@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Page load waterfall</title>
+  <style>
+    :root { color-scheme: light; font: 15px/1.5 system-ui, sans-serif; background: #f5f7fb; color: #172033; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { max-width: 1800px; margin: auto; padding: 2rem clamp(1rem, 3vw, 3rem); }
+    h1, h2 { line-height: 1.2; }
+    h1 { margin: 0 0 .3rem; font-size: 1.9rem; }
+    h2 { font-size: 1.25rem; }
+    p { margin: .4rem 0 1rem; }
+    .muted { color: #526176; }
+    .card { background: white; border: 1px solid #cbd5e1; border-radius: .65rem; padding: 1rem; box-shadow: 0 2px 8px #1720330a; }
+    .summary { overflow-x: auto; margin: 1.5rem 0; }
+    table { border-collapse: collapse; min-width: 540px; width: 100%; text-align: left; }
+    th, td { padding: .55rem .75rem; border-bottom: 1px solid #dce3ed; }
+    th { color: #344055; }
+    tr:last-child th, tr:last-child td { border-bottom: 0; }
+    .controls { display: flex; flex-wrap: wrap; gap: .8rem 1rem; align-items: end; margin: 1.5rem 0; }
+    label { display: grid; gap: .25rem; font-weight: 600; }
+    select, input { min-height: 2.35rem; padding: .35rem .55rem; border: 1px solid #78879b; border-radius: .35rem; background: white; color: #172033; font: inherit; }
+    input { min-width: min(22rem, 80vw); }
+    :focus-visible { outline: 3px solid #155eef; outline-offset: 2px; }
+    .panels { display: grid; gap: 1rem; }
+    .panels.compare { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .panel h2 { margin: 0 0 .25rem; }
+    .panel > p { overflow-wrap: anywhere; }
+    .panel-controls { margin: .75rem 0; }
+    .scroll { overflow-x: auto; border: 1px solid #dce3ed; border-radius: .4rem; }
+    .timeline, .request-row { display: grid; grid-template-columns: 210px minmax(440px, 1fr); min-width: 680px; }
+    .timeline { background: #e9eef6; font-size: .8rem; font-weight: 600; }
+    .timeline > div { padding: .35rem .55rem; }
+    .scale { position: relative; min-height: 2rem; border-left: 1px solid #cbd5e1; }
+    .tick { position: absolute; top: .4rem; color: #475569; transform: translateX(-50%); }
+    .request-row { width: 100%; border: 0; border-bottom: 1px solid #e4e9f0; background: white; color: inherit; padding: 0; text-align: left; font: inherit; cursor: pointer; }
+    .request-row:hover, .request-row[aria-current="true"] { background: #eaf2ff; }
+    .request-row:last-child { border-bottom: 0; }
+    .request-name { padding: .35rem .55rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .84rem; }
+    .request-name small { display: block; color: #526176; }
+    .track { position: relative; min-height: 2.7rem; overflow: hidden; border-left: 1px solid #e4e9f0; background: repeating-linear-gradient(90deg, transparent 0, transparent calc(25% - 1px), #edf0f5 calc(25% - 1px), #edf0f5 25%); }
+    .bar { position: absolute; top: .85rem; height: 1rem; border-radius: .2rem; min-width: 2px; background: var(--bar-color); }
+    .bar .download { position: absolute; right: 0; top: 0; bottom: 0; background: #17203355; border-radius: 0 .2rem .2rem 0; }
+    .bar.failed { background: #b42318; }
+    .bar.incomplete { background: repeating-linear-gradient(45deg, #8b5cf6, #8b5cf6 5px, #c4b5fd 5px, #c4b5fd 10px); }
+    .marker { position: absolute; top: 0; bottom: 0; width: 2px; pointer-events: none; }
+    .marker.dom { background: #14804a; }
+    .marker.load { background: #b54708; }
+    .legend { display: flex; flex-wrap: wrap; gap: .6rem 1rem; padding: .6rem 0; font-size: .82rem; color: #344055; }
+    .legend span::before { content: ''; display: inline-block; width: .7rem; height: .7rem; margin-right: .35rem; background: var(--key); }
+    .details { margin-top: 1rem; border-top: 1px solid #dce3ed; padding-top: .75rem; }
+    .details dl { display: grid; grid-template-columns: auto 1fr; gap: .3rem 1rem; margin: 0; overflow-wrap: anywhere; }
+    .details dt { font-weight: 600; }
+    .details dd { margin: 0; }
+    .empty { padding: 1rem; }
+    @media (max-width: 1100px) { .panels.compare { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Page load waterfall</h1>
+      <p class="muted" id="intro"></p>
+      <p class="muted">Each bar starts when Chrome reports the request and ends when it finishes. The darker portion is the response download. A later start does not, by itself, prove that one asset blocked another; inspect the initiator and your code to establish the cause.</p>
+    </header>
+    <section class="card summary" aria-label="Capture summary"><table id="summary"></table></section>
+    <div class="controls card" aria-label="Waterfall filters">
+      <label>Resource type <select id="type"><option value="">All types</option></select></label>
+      <label>Host <select id="host"><option value="">All hosts</option></select></label>
+      <label>Find request <input id="search" type="search" placeholder="URL or initiator"></label>
+      <label>Order <select id="order"><option value="start">Start time</option><option value="duration">Longest first</option><option value="size">Largest first</option></select></label>
+      <label>Time range <select id="zoom"><option value="auto">All requests</option><option value="25">First 25 ms</option><option value="100">First 100 ms</option><option value="500">First 500 ms</option><option value="1000">First 1 s</option><option value="5000">First 5 s</option></select></label>
+    </div>
+    <div class="legend" aria-label="Timing markers"><span style="--key:#14804a">DOM content loaded</span><span style="--key:#b54708">Load event</span><span style="--key:#17203355">Response download</span><span style="--key:#b42318">Failed request</span></div>
+    <div class="panels" id="panels"></div>
+  </main>
+  <script>
+    'use strict';
+    const data = /*__PAGE_LOAD_DATA__*/;
+    const $ = (selector) => document.querySelector(selector);
+    const formatMs = (value) => Number.isFinite(value) ? `${Math.round(value)} ms` : '—';
+    const formatBytes = (value) => Number.isFinite(value) ? `${Math.round(value / 1024)} KiB` : '—';
+    const formatTick = (value) => value < 1000 ? `${Math.round(value)} ms` : `${Number((value / 1000).toFixed(2))} s`;
+    const median = (values) => {
+      const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+      if (!sorted.length) return null;
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    };
+    const summary = (capture) => ({
+      dom: median(capture.runs.map((run) => run.markers.domContentMs)),
+      load: median(capture.runs.map((run) => run.markers.loadMs)),
+      end: median(capture.runs.map((run) => Math.max(0, ...run.requests.map((request) => request.endMs)))),
+      requests: median(capture.runs.map((run) => run.requests.length)),
+      bytes: median(capture.runs.map((run) => run.requests.reduce((sum, request) => sum + request.sizeBytes, 0))),
+    });
+    const element = (tag, className, text) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = String(text);
+      return node;
+    };
+    const host = (url) => { try { return new URL(url).host; } catch { return ''; } };
+    const name = (url) => { try { const parsed = new URL(url); return `${parsed.pathname.split('/').pop() || '/'}${parsed.search}`; } catch { return url; } };
+    const colours = { Document: '#3855a6', Script: '#7551a8', Stylesheet: '#a34482', Image: '#22799b', Font: '#9b6228', XHR: '#347a64', Fetch: '#347a64', Media: '#976728' };
+    const panels = [];
+
+    function tableCell(row, tag, value) { row.append(element(tag, '', value)); }
+    function drawSummary() {
+      const table = $('#summary');
+      const head = element('tr');
+      ['Median of captured runs', data.mode === 'compare' ? 'Before' : 'Value', ...(data.mode === 'compare' ? ['After', 'Change'] : [])].forEach((label) => tableCell(head, 'th', label));
+      table.append(head);
+      const values = data.captures.map(summary);
+      const metrics = [['DOM content loaded', 'dom', formatMs], ['Load event', 'load', formatMs], ['Last captured request', 'end', formatMs], ['Requests', 'requests', (v) => String(v ?? '—')], ['Transferred', 'bytes', formatBytes]];
+      for (const [label, key, format] of metrics) {
+        const row = element('tr');
+        tableCell(row, 'th', label);
+        tableCell(row, 'td', format(values[0][key]));
+        if (values[1]) {
+          tableCell(row, 'td', format(values[1][key]));
+          const change = Number.isFinite(values[0][key]) && Number.isFinite(values[1][key]) ? values[1][key] - values[0][key] : null;
+          tableCell(row, 'td', change === null ? '—' : `${change > 0 ? '+' : ''}${format(change)}`);
+        }
+        table.append(row);
+      }
+    }
+
+    function appendDetails(container, request, run) {
+      container.replaceChildren();
+      container.append(element('h3', '', 'Request details'));
+      const list = element('dl');
+      const fields = [
+        ['URL', request.url], ['Method', request.method], ['Type', request.type], ['Status', request.status ?? '—'],
+        ['Protocol', request.protocol || '—'], ['Start', formatMs(request.startMs)], ['First response', formatMs(request.responseMs)],
+        ['End', formatMs(request.endMs)], ['Transferred', formatBytes(request.sizeBytes)],
+        ['Initiated by', `${request.initiator?.type || 'unknown'}${request.initiator?.url ? `: ${request.initiator.url}` : ''}${request.initiator?.line ? `:${request.initiator.line}` : ''}`],
+      ];
+      if (request.failure) fields.push(['Failure', request.failure]);
+      if (request.blockedReason) fields.push(['Blocked reason', request.blockedReason]);
+      if (request.incomplete) fields.push(['Capture', 'Request still in progress when capture ended']);
+      if (request.fromCache) fields.push(['Source', 'Cache or service worker']);
+      const source = run.requests.filter((item) => item.url === request.initiator?.url && item.startMs < request.startMs).at(-1);
+      if (source) {
+        const gap = request.startMs - source.endMs;
+        fields.push(['Initiator request timing', gap >= 0 ? `That request finished ${formatMs(gap)} before this one started.` : `That request was still in progress when this one started.`]);
+      }
+      for (const [key, value] of fields) { list.append(element('dt', '', key), element('dd', '', value)); }
+      container.append(list);
+    }
+
+    function appendMarker(track, value, scale, kind) {
+      if (!Number.isFinite(value)) return;
+      const marker = element('span', `marker ${kind}`);
+      marker.style.left = `${Math.min(100, value / scale * 100)}%`;
+      track.append(marker);
+    }
+
+    function drawPanel(panel) {
+      const run = panel.capture.runs[Number(panel.select.value)];
+      const type = $('#type').value;
+      const chosenHost = $('#host').value;
+      const query = $('#search').value.toLowerCase().trim();
+      const order = $('#order').value;
+      const requests = run.requests.filter((request) =>
+        (!type || request.type === type) && (!chosenHost || host(request.url) === chosenHost) &&
+        (!query || `${request.url} ${request.initiator?.url || ''}`.toLowerCase().includes(query)));
+      requests.sort(order === 'duration' ? (a, b) => (b.endMs - b.startMs) - (a.endMs - a.startMs) :
+        order === 'size' ? (a, b) => b.sizeBytes - a.sizeBytes : (a, b) => a.startMs - b.startMs);
+      const scale = $('#zoom').value === 'auto' ? Math.max(100, run.markers.loadMs || 0, ...run.requests.map((request) => request.endMs)) * 1.08 : Number($('#zoom').value);
+      panel.meta.textContent = `${requests.length} of ${run.requests.length} requests · ${run.timedOut ? 'Load event timed out' : 'Captured through 2 seconds after load'}`;
+      panel.list.replaceChildren();
+      panel.details.replaceChildren(element('p', 'muted', 'Select a request to see its details.'));
+      const timeline = element('div', 'timeline');
+      timeline.append(element('div', '', 'Request'));
+      const ticks = element('div', 'scale');
+      for (let index = 0; index <= 4; index++) {
+        const tick = element('span', 'tick', formatTick(scale * index / 4));
+        tick.style.left = `${index * 25}%`;
+        ticks.append(tick);
+      }
+      timeline.append(ticks);
+      panel.list.append(timeline);
+      if (!requests.length) panel.list.append(element('p', 'empty', 'No requests match these filters.'));
+      for (const request of requests) {
+        const row = element('button', 'request-row');
+        row.type = 'button';
+        row.setAttribute('aria-label', `${request.type} ${request.url}, ${formatMs(request.startMs)} to ${formatMs(request.endMs)}`);
+        const label = element('span', 'request-name', name(request.url));
+        const via = request.initiator?.url ? ` · via ${name(request.initiator.url)}` : '';
+        label.append(element('small', '', `${host(request.url)} · ${request.type} · ${request.status ?? request.failure ?? 'pending'}${via}`));
+        const track = element('span', 'track');
+        appendMarker(track, run.markers.domContentMs, scale, 'dom');
+        appendMarker(track, run.markers.loadMs, scale, 'load');
+        const bar = element('span', `bar${request.failure ? ' failed' : ''}${request.incomplete ? ' incomplete' : ''}`);
+        bar.style.setProperty('--bar-color', colours[request.type] || '#68778f');
+        bar.style.left = `${Math.min(100, request.startMs / scale * 100)}%`;
+        const duration = Math.max(2, request.endMs - request.startMs);
+        bar.style.width = `${Math.max(.25, duration / scale * 100)}%`;
+        if (Number.isFinite(request.responseMs)) {
+          const download = element('span', 'download');
+          download.style.width = `${Math.max(0, Math.min(100, (request.endMs - request.responseMs) / duration * 100))}%`;
+          bar.append(download);
+        }
+        track.append(bar);
+        row.append(label, track);
+        row.addEventListener('click', () => {
+          panel.list.querySelectorAll('[aria-current]').forEach((selected) => selected.removeAttribute('aria-current'));
+          row.setAttribute('aria-current', 'true');
+          appendDetails(panel.details, request, run);
+        });
+        panel.list.append(row);
+      }
+    }
+
+    function populateFilters() {
+      const requests = data.captures.flatMap((capture) => capture.runs.flatMap((run) => run.requests));
+      for (const type of [...new Set(requests.map((request) => request.type))].sort()) $('#type').append(element('option', '', type));
+      for (const value of [...new Set(requests.map((request) => host(request.url)))].filter(Boolean).sort()) $('#host').append(element('option', '', value));
+      for (const control of ['#type', '#host', '#search', '#order', '#zoom']) $(control).addEventListener('input', () => panels.forEach(drawPanel));
+    }
+
+    function createPanel(capture, index) {
+      const section = element('section', 'panel card');
+      section.append(element('h2', '', data.mode === 'compare' ? (index ? 'After' : 'Before') : 'Capture'));
+      section.append(element('p', 'muted', capture.url));
+      const controls = element('div', 'panel-controls');
+      const label = element('label', '', 'Run');
+      const select = element('select');
+      capture.runs.forEach((_, runIndex) => { const option = element('option', '', String(runIndex + 1)); option.value = String(runIndex); select.append(option); });
+      label.append(select);
+      controls.append(label);
+      section.append(controls);
+      const meta = element('p', 'muted');
+      section.append(meta);
+      const list = element('div', 'scroll');
+      section.append(list);
+      const details = element('section', 'details');
+      details.setAttribute('aria-live', 'polite');
+      section.append(details);
+      $('#panels').append(section);
+      const panel = { capture, select, meta, list, details };
+      select.addEventListener('change', () => drawPanel(panel));
+      panels.push(panel);
+      drawPanel(panel);
+    }
+
+    $('#intro').textContent = data.mode === 'compare' ? 'Comparison of two cold-cache captures. Values are medians across runs.' : 'Cold-cache capture. Values are medians across runs.';
+    if (data.mode === 'compare') $('#panels').classList.add('compare');
+    drawSummary();
+    populateFilters();
+    data.captures.forEach(createPanel);
+  </script>
+</body>
+</html>
