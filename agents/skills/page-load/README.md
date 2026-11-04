@@ -51,9 +51,18 @@ existing report, run `open -a 'Google Chrome' '/path/to/report.html'`.
 The command prints the report path. Each capture makes three visits with an
 empty browser cache and continues recording for two seconds after the load
 event. The report lets you inspect request timing, initiators and failures, and
-filter or zoom the waterfall. Select a request to open its details in a modal;
-press Escape or use Close to return to the waterfall. A later request start
-alone does not prove that another asset blocked it.
+filter or zoom the waterfall. Where Chrome provides detailed timing, each bar
+shows time before sending, sending the request, waiting for a response,
+receiving response headers and downloading the content. Select a request to
+see those durations and available DNS, connection, TLS and proxy timings in a
+modal; press Escape or use Close to return to the waterfall. Older captures
+still open, but need a new capture to show these phases.
+
+Time before sending includes browser scheduling and connection setup. It does
+not reveal exactly how long another asset blocked the request. Waiting for a
+response includes network latency and server processing. DNS and TLS timings
+can overlap the connection duration, so do not add them to the phase totals.
+A later request start alone does not prove that another asset blocked it.
 
 The report also shows long animation frames of at least 50 ms above each
 waterfall. Where Chrome supplies it, the section lists script URLs and

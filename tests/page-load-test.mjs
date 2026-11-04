@@ -31,6 +31,38 @@ test('normalises request and milestone times relative to first event', () => {
   assert.deepEqual(run.mainThread, mainThread);
 });
 
+test('normalises Chrome request phases and optional connection timings', () => {
+  const run = normaliseRun({
+    capturedAt: '2026-11-04T00:00:00.000Z', timedOut: false, finished: 106,
+    markers: { domContent: 105, load: 105.5 },
+    requests: [{
+      url: 'https://example.com/image.jpg', method: 'GET', type: 'Image',
+      started: 100, responded: 104.9, ended: 105, sizeBytes: 1024,
+      timing: { requestTime: 100, proxyStart: -1, proxyEnd: -1,
+        dnsStart: 100, dnsEnd: 120, connectStart: 120, connectEnd: 170,
+        sslStart: 130, sslEnd: 165, sendStart: 4000, sendEnd: 4010,
+        receiveHeadersStart: 4800, receiveHeadersEnd: 4900 },
+    }],
+  });
+  assert.deepEqual(run.requests[0].timing, {
+    sendStartMs: 4000, sendEndMs: 4010, headersStartMs: 4800, headersEndMs: 4900,
+    proxyMs: null, dnsMs: 20, connectMs: 50, sslMs: 35,
+  });
+  assert.equal(run.requests[0].endMs - run.requests[0].timing.headersEndMs, 100);
+});
+
+test('omits unavailable, invalid and incomplete request phases', () => {
+  const base = { url: 'https://example.com/', started: 100, responded: 100.2, ended: 100.3, sizeBytes: 10 };
+  const run = normaliseRun({ capturedAt: '2026-11-04T00:00:00.000Z', timedOut: false,
+    finished: 101, markers: { domContent: 100.5, load: 100.6 }, requests: [
+      base,
+      { ...base, timing: { requestTime: 100, sendStart: 150, sendEnd: 160, receiveHeadersEnd: 400 } },
+      { ...base, ended: null, timing: { requestTime: 100, sendStart: 150, sendEnd: 160, receiveHeadersEnd: 200 } },
+    ],
+  });
+  assert.deepEqual(run.requests.map((request) => request.timing), [null, null, null]);
+});
+
 test('summarises repeated runs with medians', () => {
   const capture = { runs: [
     { markers: { loadMs: 100 }, durationMs: 150, requests: [{ sizeBytes: 100, endMs: 120 }] },

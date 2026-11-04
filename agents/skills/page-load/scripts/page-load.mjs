@@ -194,6 +194,28 @@ export function normaliseRun(raw) {
   const first = Math.min(...raw.requests.map((request) => request.started), ...Object.values(raw.markers).filter(Number.isFinite));
   const origin = Number.isFinite(first) ? first : raw.finished;
   const ms = (value) => Number.isFinite(value) ? Math.max(0, Math.round((value - origin) * 1000)) : null;
+  const timing = (request) => {
+    const source = request.timing;
+    if (!source || !Number.isFinite(source.requestTime) || !Number.isFinite(request.ended) || request.failure) return null;
+    const point = (offset) => Number.isFinite(offset) && offset >= 0 ? ms(source.requestTime + offset / 1000) : null;
+    const duration = (start, end) => Number.isFinite(start) && start >= 0 && Number.isFinite(end) && end >= start ? Math.round(end - start) : null;
+    const sendStartMs = point(source.sendStart);
+    const sendEndMs = point(source.sendEnd);
+    const headersStartMs = point(source.receiveHeadersStart);
+    const headersEndMs = point(source.receiveHeadersEnd);
+    if (sendStartMs === null || sendEndMs === null || headersEndMs === null ||
+        sendStartMs < ms(request.started) || sendEndMs < sendStartMs ||
+        headersEndMs < sendEndMs || headersEndMs > ms(request.ended ?? raw.finished)) return null;
+    return {
+      sendStartMs, sendEndMs,
+      headersStartMs: headersStartMs !== null && headersStartMs >= sendEndMs && headersStartMs <= headersEndMs ? headersStartMs : null,
+      headersEndMs,
+      proxyMs: duration(source.proxyStart, source.proxyEnd),
+      dnsMs: duration(source.dnsStart, source.dnsEnd),
+      connectMs: duration(source.connectStart, source.connectEnd),
+      sslMs: duration(source.sslStart, source.sslEnd),
+    };
+  };
   return {
     capturedAt: raw.capturedAt,
     timedOut: raw.timedOut,
@@ -210,6 +232,7 @@ export function normaliseRun(raw) {
       startMs: ms(request.started),
       responseMs: ms(request.responded),
       endMs: ms(request.ended ?? raw.finished),
+      timing: timing(request),
       sizeBytes: request.sizeBytes || 0,
       initiator: request.initiator,
       failure: request.failure || null,
@@ -278,6 +301,8 @@ async function captureRun(cdp, url) {
         if (previous && params.redirectResponse) {
           previous.status = params.redirectResponse.status;
           previous.protocol = params.redirectResponse.protocol || null;
+          previous.responded = params.timestamp;
+          previous.timing = params.redirectResponse.timing || null;
           previous.ended = params.timestamp;
           current.delete(params.requestId);
         }
@@ -302,6 +327,7 @@ async function captureRun(cdp, url) {
         request.status = params.response.status;
         request.protocol = params.response.protocol || null;
         request.responded = params.timestamp;
+        request.timing = params.response.timing || null;
         request.fromCache = params.response.fromDiskCache || params.response.fromServiceWorker;
       } else if (method === 'Network.loadingFinished') {
         const request = current.get(params.requestId);

@@ -42,8 +42,15 @@
     .request-name { padding: .35rem .55rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .84rem; }
     .request-name small { display: block; color: #526176; }
     .track { position: relative; min-height: 2.7rem; overflow: hidden; border-left: 1px solid #e4e9f0; background: repeating-linear-gradient(90deg, transparent 0, transparent calc(25% - 1px), #edf0f5 calc(25% - 1px), #edf0f5 25%); }
-    .bar { position: absolute; top: .85rem; height: 1rem; border-radius: .2rem; min-width: 2px; background: var(--bar-color); }
-    .bar .download { position: absolute; right: 0; top: 0; bottom: 0; background: #17203355; border-radius: 0 .2rem .2rem 0; }
+    .bar { position: absolute; top: .85rem; height: 1rem; border-radius: .2rem; min-width: 2px; background: var(--bar-color); overflow: hidden; }
+    .bar.phased { display: flex; }
+    .phase { display: block; height: 100%; flex: none; }
+    .phase.pre-send { background: #64748b; }
+    .phase.sending { background: #a34482; }
+    .phase.waiting { background: #d28a15; }
+    .phase.headers { background: #9a720d; }
+    .phase.receiving { background: #22799b; }
+    .bar .legacy-download { position: absolute; right: 0; top: 0; bottom: 0; background: #17203355; }
     .bar.failed { background: #b42318; }
     .bar.incomplete { background: repeating-linear-gradient(45deg, #8b5cf6, #8b5cf6 5px, #c4b5fd 5px, #c4b5fd 10px); }
     .marker { position: absolute; top: 0; bottom: 0; width: 2px; pointer-events: none; }
@@ -75,7 +82,7 @@
     <header>
       <h1>Page load waterfall</h1>
       <p class="muted" id="intro"></p>
-      <p class="muted">Each bar starts when Chrome reports the request and ends when it finishes. The darker portion is the response download. A later start does not, by itself, prove that one asset blocked another; inspect the initiator and your code to establish the cause.</p>
+      <p class="muted">Each bar starts when Chrome reports the request and ends when it finishes. Its colours show the measured phases where Chrome provides them. Time before sending can include queueing, connection setup and other browser work. Waiting for a response includes network and server time. Neither phase alone proves that another asset blocked the request.</p>
     </header>
     <section class="card summary" aria-label="Capture summary"><table id="summary"></table></section>
     <div class="controls card" aria-label="Waterfall filters">
@@ -85,7 +92,7 @@
       <label>Order <select id="order"><option value="start">Start time</option><option value="duration">Longest first</option><option value="size">Largest first</option></select></label>
       <label>Time range <select id="zoom"><option value="auto">All requests</option><option value="25">First 25 ms</option><option value="100">First 100 ms</option><option value="500">First 500 ms</option><option value="1000">First 1 s</option><option value="5000">First 5 s</option></select></label>
     </div>
-    <div class="legend" aria-label="Timing markers"><span style="--key:#14804a">DOM content loaded</span><span style="--key:#b54708">Load event</span><span style="--key:#17203355">Response download</span><span style="--key:#b42318">Failed request</span></div>
+    <div class="legend" aria-label="Timing phases and markers"><span style="--key:#64748b">Before send</span><span style="--key:#a34482">Sending</span><span style="--key:#d28a15">Waiting for response</span><span style="--key:#9a720d">Response headers</span><span style="--key:#22799b">Content download</span><span style="--key:#17203355">Older capture: response to end</span><span style="--key:#14804a">DOM content loaded</span><span style="--key:#b54708">Load event</span><span style="--key:#b42318">Failed request</span></div>
     <div class="panels" id="panels"></div>
     <dialog class="request-dialog" id="request-dialog" aria-labelledby="request-dialog-title">
       <header>
@@ -156,10 +163,24 @@
       const list = element('dl');
       const fields = [
         ['URL', request.url], ['Method', request.method], ['Type', request.type], ['Status', request.status ?? '—'],
-        ['Protocol', request.protocol || '—'], ['Start', formatMs(request.startMs)], ['First response', formatMs(request.responseMs)],
-        ['End', formatMs(request.endMs)], ['Transferred', formatBytes(request.sizeBytes)],
+        ['Protocol', request.protocol || '—'], ['Start', formatMs(request.startMs)],
+        [Number.isFinite(request.timing?.headersStartMs) ? 'First response byte' : 'Response event', formatMs(request.timing?.headersStartMs ?? request.responseMs)],
+        ...(request.timing ? [['Headers complete', formatMs(request.timing.headersEndMs)]] : []),
+        ['End', formatMs(request.endMs)], ['Total request time', formatMs(request.endMs - request.startMs)], ['Transferred', formatBytes(request.sizeBytes)],
         ['Initiated by', `${request.initiator?.type || 'unknown'}${request.initiator?.url ? `: ${request.initiator.url}` : ''}${request.initiator?.line ? `:${request.initiator.line}` : ''}`],
       ];
+      const timing = request.timing;
+      if (timing) {
+        fields.push(
+          ['Before send (queue and setup)', formatMs(timing.sendStartMs - request.startMs)],
+          ['Sending request', formatMs(timing.sendEndMs - timing.sendStartMs)],
+          ['Waiting for response', formatMs((timing.headersStartMs ?? timing.headersEndMs) - timing.sendEndMs)],
+          ['Receiving headers', formatMs(timing.headersStartMs === null ? null : timing.headersEndMs - timing.headersStartMs)],
+          ['Content download', formatMs(request.endMs - timing.headersEndMs)],
+          ['DNS lookup', formatMs(timing.dnsMs)], ['Connection setup', formatMs(timing.connectMs)],
+          ['TLS handshake', formatMs(timing.sslMs)], ['Proxy negotiation', formatMs(timing.proxyMs)],
+        );
+      }
       if (request.failure) fields.push(['Failure', request.failure]);
       if (request.blockedReason) fields.push(['Blocked reason', request.blockedReason]);
       if (request.incomplete) fields.push(['Capture', 'Request still in progress when capture ended']);
@@ -171,6 +192,9 @@
       }
       for (const [key, value] of fields) { list.append(element('dt', '', key), element('dd', '', value)); }
       container.append(list);
+      container.append(element('p', 'muted', timing ?
+        'Before send includes browser scheduling and connection setup; it is not an exact blocked-by-another-request duration. DNS, TLS and proxy time may overlap connection setup, so do not add those values to the phase totals. Content download can include browser delays while reading a response, including one from a service worker.' :
+        'Detailed phases were unavailable for this request. Older captures need a new capture to show them.'));
     }
 
     function drawMainThread(container, run) {
@@ -278,8 +302,18 @@
         bar.style.left = `${Math.min(100, request.startMs / scale * 100)}%`;
         const duration = Math.max(2, request.endMs - request.startMs);
         bar.style.width = `${Math.max(.25, duration / scale * 100)}%`;
-        if (Number.isFinite(request.responseMs)) {
-          const download = element('span', 'download');
+        if (request.timing) {
+          bar.classList.add('phased');
+          const { sendStartMs, sendEndMs, headersStartMs, headersEndMs } = request.timing;
+          const boundaries = [request.startMs, sendStartMs, sendEndMs, ...(headersStartMs === null ? [] : [headersStartMs]), headersEndMs, request.endMs];
+          const kinds = headersStartMs === null ? ['pre-send', 'sending', 'waiting', 'receiving'] : ['pre-send', 'sending', 'waiting', 'headers', 'receiving'];
+          for (let index = 0; index < kinds.length; index++) {
+            const phase = element('span', `phase ${kinds[index]}`);
+            phase.style.width = `${Math.max(0, (boundaries[index + 1] - boundaries[index]) / duration * 100)}%`;
+            bar.append(phase);
+          }
+        } else if (Number.isFinite(request.responseMs)) {
+          const download = element('span', 'legacy-download');
           download.style.width = `${Math.max(0, Math.min(100, (request.endMs - request.responseMs) / duration * 100))}%`;
           bar.append(download);
         }
