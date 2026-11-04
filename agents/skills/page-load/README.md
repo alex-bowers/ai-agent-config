@@ -28,6 +28,13 @@ with the previous capture. Ask it to explain the comparison if you want code
 suggestions. Capturing through Codex uses AI to run the command, but the command
 itself gathers and processes the browser data without AI.
 
+On macOS, Codex may ask you to approve local process access before capture so
+it can launch headless Chrome. Approving that command avoids a failed launch
+inside Codex's command sandbox. If approval is unavailable, run the capture
+from your VS Code terminal and ask Codex to interpret the saved result. The
+comparison command does not launch Chrome. Do not turn off Chrome's own sandbox
+or certificate checks.
+
 ## Use from the terminal
 
 From the website repository, run:

@@ -7,6 +7,12 @@ description: Capture and compare cold-cache page-load network waterfalls for loc
 
 Use the bundled Node command for deterministic capture and comparison. It starts the installed Chrome browser, needs no AI to gather timing data, and writes a self-contained HTML report plus JSON under `.page-load/` in the current repository. Keep Chrome's normal certificate checks enabled, including for `.test` sites.
 
+## Chrome access from Codex on macOS
+
+The capture command launches a native Chrome process and connects to its local debugging endpoint. In Codex's default macOS command sandbox, Chrome may quit before that endpoint starts. Request the command tool's approved local process access for the **first** capture attempt; do not launch Chrome inside that sandbox as a probe. Explain that the approval is for starting headless Chrome and loading the requested page. Do not disable Chrome's own sandbox or certificate checks.
+
+If approval is unavailable or denied, stop and give the user the terminal command to run outside Codex. If the approved launch fails, report the error and stop rather than repeatedly relaunching Chrome. The `compare` command only reads local captures and does not need Chrome access.
+
 ## Capture
 
 1. Work from the website repository. If the target URL is missing, ask for it; do not guess a production URL.
