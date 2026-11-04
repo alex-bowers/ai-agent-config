@@ -37,6 +37,9 @@ export function median(values) {
 
 export function summarise(capture) {
   return {
+    ttfbMs: median(capture.runs.map((run) => run.pageMetrics?.ttfbMs)),
+    fcpMs: median(capture.runs.map((run) => run.pageMetrics?.fcpMs)),
+    lcpMs: median(capture.runs.map((run) => run.pageMetrics?.lcpMs)),
     loadMs: median(capture.runs.map((run) => run.markers.loadMs)),
     domContentMs: median(capture.runs.map((run) => run.markers.domContentMs)),
     requestCount: median(capture.runs.map((run) => run.requests.length)),
@@ -221,6 +224,7 @@ export function normaliseRun(raw) {
     timedOut: raw.timedOut,
     durationMs: ms(raw.finished),
     markers: { domContentMs: ms(raw.markers.domContent), loadMs: ms(raw.markers.load) },
+    pageMetrics: raw.pageMetrics,
     mainThread: raw.mainThread,
     requests: raw.requests.map((request, index) => ({
       id: index + 1,
@@ -241,6 +245,37 @@ export function normaliseRun(raw) {
       fromCache: Boolean(request.fromCache),
     })),
   };
+}
+
+async function readPageMetrics(cdp, sessionId) {
+  const expression = `new Promise((resolve) => {
+    const navigation = performance.getEntriesByType('navigation')[0];
+    const fcp = performance.getEntriesByName('first-contentful-paint', 'paint')[0];
+    let lcp = null;
+    if (typeof PerformanceObserver === 'undefined' ||
+        !PerformanceObserver.supportedEntryTypes.includes('largest-contentful-paint')) {
+      resolve({ ttfbMs: navigation?.responseStart || null, fcpMs: fcp?.startTime ?? null, lcpMs: null });
+      return;
+    }
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) lcp = entry.startTime;
+    });
+    observer.observe({ type: 'largest-contentful-paint', buffered: true });
+    setTimeout(() => {
+      for (const entry of observer.takeRecords()) lcp = entry.startTime;
+      observer.disconnect();
+      resolve({ ttfbMs: navigation?.responseStart || null, fcpMs: fcp?.startTime ?? null, lcpMs: lcp });
+    }, 0);
+  })`;
+  try {
+    const result = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId);
+    if (result.exceptionDetails || !result.result?.value) return null;
+    const metrics = result.result.value;
+    return Object.fromEntries(['ttfbMs', 'fcpMs', 'lcpMs'].map((key) =>
+      [key, Number.isFinite(metrics[key]) ? Math.round(metrics[key]) : null]));
+  } catch {
+    return null;
+  }
 }
 
 async function readMainThread(cdp, sessionId) {
@@ -303,6 +338,7 @@ async function captureRun(cdp, url) {
           previous.protocol = params.redirectResponse.protocol || null;
           previous.responded = params.timestamp;
           previous.timing = params.redirectResponse.timing || null;
+          previous.sizeBytes = params.redirectResponse.encodedDataLength || 0;
           previous.ended = params.timestamp;
           current.delete(params.requestId);
         }
@@ -361,8 +397,9 @@ async function captureRun(cdp, url) {
     }
     const finished = markers.load ? markers.load + POST_LOAD_MS / 1000 :
       Math.max(...requests.map((request) => request.ended || request.started), 0);
+    const pageMetrics = await readPageMetrics(cdp, sessionId);
     const mainThread = await readMainThread(cdp, sessionId);
-    return normaliseRun({ capturedAt: new Date().toISOString(), timedOut, requests, markers, finished, mainThread });
+    return normaliseRun({ capturedAt: new Date().toISOString(), timedOut, requests, markers, finished, pageMetrics, mainThread });
   } finally {
     removeListener();
     await cdp.send('Target.disposeBrowserContext', { browserContextId }).catch(() => {});

@@ -17,7 +17,7 @@ If approval is unavailable or denied, stop and give the user the terminal comman
 
 1. Work from the website repository. If the target URL is missing, ask for it; do not guess a production URL.
 2. Run `node <skill-directory>/scripts/page-load.mjs capture <url> --open` from the repository root. Quote the URL as a single shell argument. The flag opens the generated report in Chrome after capture.
-3. Give the user the report's local path and a short factual summary: run count, load-event median, request count, and any capture or browser-opening errors. If opening fails, give the user `open -a 'Google Chrome' '<report-path>'` on macOS instead of retrying. Do not interpret causes unless asked.
+3. Give the user the report's local path and a short factual summary: run count, load-event median, request count, and any capture or browser-opening errors. The report also shows document time to first byte, First Contentful Paint, the latest Largest Contentful Paint candidate seen during the capture, and request/byte totals by resource type and host. If opening fails, give the user `open -a 'Google Chrome' '<report-path>'` on macOS instead of retrying. Do not interpret causes unless asked.
 4. Keep the directory path for a later comparison. The command runs Chrome three times with isolated browser state, waits two seconds after each load event, and stores no response bodies or headers.
 
 ## Compare

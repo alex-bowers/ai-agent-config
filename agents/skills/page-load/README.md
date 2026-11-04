@@ -50,13 +50,18 @@ existing report, run `open -a 'Google Chrome' '/path/to/report.html'`.
 
 The command prints the report path. Each capture makes three visits with an
 empty browser cache and continues recording for two seconds after the load
-event. The report lets you inspect request timing, initiators and failures, and
-filter or zoom the waterfall. Where Chrome provides detailed timing, each bar
-shows time before sending, sending the request, waiting for a response,
-receiving response headers and downloading the content. Select a request to
-see those durations and available DNS, connection, TLS and proxy timings in a
-modal; press Escape or use Close to return to the waterfall. Older captures
-still open, but need a new capture to show these phases.
+event. The summary shows median document time to first byte, First Contentful
+Paint and the latest Largest Contentful Paint candidate observed during each
+run. These paint timings start at navigation; Largest Contentful Paint may
+change after the capture ends. Older captures show these values as unavailable.
+For the selected run, the report also totals requests and transferred bytes by
+resource type and host. The report lets you inspect request timing, initiators
+and failures, and filter or zoom the waterfall. Where Chrome provides detailed
+timing, each bar shows time before sending, sending the request, waiting for a
+response, receiving response headers and downloading the content. Select a
+request to see those durations and available DNS, connection, TLS and proxy
+timings in a modal; press Escape or use Close to return to the waterfall.
+Older captures still open, but need a new capture to show these phases.
 
 Time before sending includes browser scheduling and connection setup. It does
 not reveal exactly how long another asset blocked the request. Waiting for a

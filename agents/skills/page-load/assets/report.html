@@ -65,6 +65,11 @@
     .main-thread li { margin: .3rem 0; }
     .main-thread details { margin-top: .5rem; }
     .main-thread summary { cursor: pointer; font-weight: 600; }
+    .breakdowns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1rem 0; }
+    .breakdowns h3 { margin: 0 0 .35rem; font-size: 1rem; }
+    .breakdowns table { min-width: 0; }
+    .breakdowns th:first-child { overflow-wrap: anywhere; }
+    .breakdowns th:not(:first-child), .breakdowns td { text-align: right; white-space: nowrap; }
     .request-dialog { width: min(44rem, calc(100vw - 2rem)); max-height: 85dvh; padding: 1.25rem; border: 1px solid #78879b; border-radius: .65rem; background: white; color: #172033; box-shadow: 0 16px 50px #17203355; }
     .request-dialog::backdrop { background: #172033a8; }
     .request-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; }
@@ -75,6 +80,7 @@
     .request-dialog dd { margin: 0; }
     .empty { padding: 1rem; }
     @media (max-width: 1100px) { .panels.compare { grid-template-columns: 1fr; } }
+    @media (max-width: 700px) { .breakdowns { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -82,6 +88,7 @@
     <header>
       <h1>Page load waterfall</h1>
       <p class="muted" id="intro"></p>
+      <p class="muted">Paint timings are measured from navigation start. Largest Contentful Paint is the latest candidate seen before this capture ends, normally two seconds after the load event. A missing timing is shown as —.</p>
       <p class="muted">Each bar starts when Chrome reports the request and ends when it finishes. Its colours show the measured phases where Chrome provides them. Time before sending can include queueing, connection setup and other browser work. Waiting for a response includes network and server time. Neither phase alone proves that another asset blocked the request.</p>
     </header>
     <section class="card summary" aria-label="Capture summary"><table id="summary"></table></section>
@@ -116,6 +123,9 @@
       return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     };
     const summary = (capture) => ({
+      ttfb: median(capture.runs.map((run) => run.pageMetrics?.ttfbMs)),
+      fcp: median(capture.runs.map((run) => run.pageMetrics?.fcpMs)),
+      lcp: median(capture.runs.map((run) => run.pageMetrics?.lcpMs)),
       dom: median(capture.runs.map((run) => run.markers.domContentMs)),
       load: median(capture.runs.map((run) => run.markers.loadMs)),
       end: median(capture.runs.map((run) => Math.max(0, ...run.requests.map((request) => request.endMs)))),
@@ -144,7 +154,14 @@
       ['Median of captured runs', data.mode === 'compare' ? 'Before' : 'Value', ...(data.mode === 'compare' ? ['After', 'Change'] : [])].forEach((label) => tableCell(head, 'th', label));
       table.append(head);
       const values = data.captures.map(summary);
-      const metrics = [['DOM content loaded', 'dom', formatMs], ['Load event', 'load', formatMs], ['Last captured request', 'end', formatMs], ['Requests', 'requests', (v) => String(v ?? '—')], ['Transferred', 'bytes', formatBytes]];
+      const metrics = [
+        ['Document time to first byte', 'ttfb', formatMs],
+        ['First Contentful Paint', 'fcp', formatMs],
+        ['Largest Contentful Paint', 'lcp', formatMs],
+        ['DOM content loaded', 'dom', formatMs], ['Load event', 'load', formatMs],
+        ['Last captured request', 'end', formatMs], ['Requests', 'requests', (v) => String(v ?? '—')],
+        ['Transferred', 'bytes', formatBytes],
+      ];
       for (const [label, key, format] of metrics) {
         const row = element('tr');
         tableCell(row, 'th', label);
@@ -253,6 +270,46 @@
       container.append(element('p', 'muted', 'This is a slow-frame summary, not a full CPU trace. Use Chrome DevTools Performance for complete call stacks and rendering work.'));
     }
 
+    function drawBreakdowns(container, run) {
+      container.replaceChildren();
+      const breakdowns = [
+        ['Resource type', (request) => request.type || 'Other'],
+        ['Host', (request) => host(request.url) || '(unknown)'],
+      ];
+      for (const [title, keyFor] of breakdowns) {
+        const section = element('section');
+        section.append(element('h3', '', title));
+        const totals = new Map();
+        for (const request of run.requests) {
+          const key = keyFor(request);
+          const current = totals.get(key) || { requests: 0, bytes: 0 };
+          current.requests++;
+          current.bytes += request.sizeBytes || 0;
+          totals.set(key, current);
+        }
+        const table = element('table');
+        const header = element('tr');
+        [title, 'Requests', 'Transferred'].forEach((label) => tableCell(header, 'th', label));
+        table.append(header);
+        for (const [key, total] of [...totals].sort((a, b) => b[1].bytes - a[1].bytes || a[0].localeCompare(b[0]))) {
+          const row = element('tr');
+          tableCell(row, 'th', key);
+          tableCell(row, 'td', total.requests);
+          tableCell(row, 'td', formatBytes(total.bytes));
+          table.append(row);
+        }
+        if (!totals.size) {
+          const row = element('tr');
+          const cell = element('td', '', 'No requests captured.');
+          cell.colSpan = 3;
+          row.append(cell);
+          table.append(row);
+        }
+        section.append(table);
+        container.append(section);
+      }
+    }
+
     function appendMarker(track, value, scale, kind) {
       if (!Number.isFinite(value)) return;
       const marker = element('span', `marker ${kind}`);
@@ -274,6 +331,7 @@
       const scale = $('#zoom').value === 'auto' ? Math.max(100, run.markers.loadMs || 0, ...run.requests.map((request) => request.endMs)) * 1.08 : Number($('#zoom').value);
       panel.meta.textContent = `${requests.length} of ${run.requests.length} requests · ${run.timedOut ? 'Load event timed out' : 'Captured through 2 seconds after load'}`;
       panel.list.replaceChildren();
+      drawBreakdowns(panel.breakdowns, run);
       drawMainThread(panel.mainThread, run);
       const timeline = element('div', 'timeline');
       timeline.append(element('div', '', 'Request'));
@@ -350,12 +408,14 @@
       section.append(controls);
       const meta = element('p', 'muted');
       section.append(meta);
+      const breakdowns = element('div', 'breakdowns');
+      section.append(breakdowns);
       const mainThread = element('section', 'main-thread');
       section.append(mainThread);
       const list = element('div', 'scroll');
       section.append(list);
       $('#panels').append(section);
-      const panel = { capture, select, meta, mainThread, list };
+      const panel = { capture, select, meta, breakdowns, mainThread, list };
       select.addEventListener('change', () => drawPanel(panel));
       panels.push(panel);
       drawPanel(panel);
